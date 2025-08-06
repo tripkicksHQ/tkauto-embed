@@ -25,9 +25,9 @@ function extractHtml(prop) {
 function extractText(prop) {
   if (!prop) return '';
   if (prop.type === 'title' && prop.title.length)
-    return prop.title.map(t => t.plain_text).join('');
+    return prop.title[0].plain_text;
   if (prop.type === 'rich_text' && prop.rich_text.length)
-    return prop.rich_text.map(t => t.plain_text).join('');
+    return prop.rich_text[0].plain_text;
   if (prop.type === 'formula') {
     if (prop.formula.type === 'string' && prop.formula.string !== null)
       return prop.formula.string;
@@ -202,11 +202,8 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>tkAuto Embed</title>
-  <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <!-- TripKicks CSS -->
   <link href="https://info.tripkicks.com/hubfs/system/mockup/tk-css.css" rel="stylesheet">
-  <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   <style>
@@ -217,66 +214,61 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       background: #fff;
       color: #37352f;
       line-height: 1.5;
-      overflow-y: auto;
+      overflow-x: hidden; /* Prevent horizontal scrollbars from scaling issues */
     }
-    
+
     .embed-container {
       width: 100%;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      padding: 0;
       box-sizing: border-box;
     }
-    
-    /* Tile section wrapper */
-.tile-section {
-  width: 100%;
-  position: relative;
-  flex-shrink: 0;
-  display: block;
-  margin-bottom: 20px;
-  clear: both;
-  overflow: visible;
-  min-height: 200px;
-}
 
-/* The tile wrapper for proper scaling */
-.tile-wrapper {
-  width: 100%;
-  max-width: none;
-  margin: 0;
-  padding: 10px;
-}
+    /* --- CORRECTED TILE STYLES --- */
 
-/* The tile content with MUCH larger scaling */
-.tile-block {
-  transform: scale(4);
-  transform-origin: top left;
-  width: 25%; /* 100 / 4 = 25% to compensate for scale */
-  margin-bottom: 2rem;
-  box-sizing: border-box;
-  display: block;
-}
+    /* This is the main container for the tile preview. 
+       Its height will be set dynamically by JavaScript to prevent content overlap. */
+    .tile-section {
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 20px;
+    }
 
-/* Override any max-width constraints */
-.tile-block > * {
-  width: 100% !important;
-  max-width: none !important;
-  box-sizing: border-box !important;
-}
-    
+    /* This wrapper provides padding and is the basis for scaling.
+       It needs to be full-width. */
+    .tile-wrapper {
+      width: 100%;
+      margin: 0;
+      padding: 20px; /* Provides spacing around the scaled tile */
+      box-sizing: border-box;
+    }
+
+    /* This is the actual tile content that gets scaled up ("zoomed"). */
+    .tile-block {
+      transform: scale(1.85);
+      transform-origin: top left;
+      /* Compensate the width for the scaling factor to fill the parent.
+         Calculation: 100% / 1.85 = 54.05% */
+      width: 54.05%;
+      box-sizing: border-box;
+    }
+
+    /* Ensure content inside the tile-block behaves correctly */
+    .tile-block > * {
+      width: 100% !important;
+      box-sizing: border-box !important;
+    }
+
+    /* --- END OF CORRECTED STYLES --- */
+
     .divider {
       height: 1px;
       background: #e9e9e7;
-      margin: 12px 16px 20px 16px;
-      flex-shrink: 0;
-      flex-grow: 0;
-      clear: both;
+      margin: 0 16px 20px 16px;
       width: calc(100% - 32px);
     }
-    
-    /* Modal section */
+
     .modal-section {
       flex: 1;
       min-height: 300px;
@@ -284,7 +276,7 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       flex-direction: column;
       padding: 0 16px 16px 16px;
       width: 100%;
-      clear: both;
+      box-sizing: border-box;
     }
     
     .modal-block {
@@ -296,7 +288,7 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       background: #fff;
       min-height: 250px;
     }
-    
+
     .controls {
       display: flex;
       gap: 8px;
@@ -304,7 +296,6 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       padding-top: 12px;
       border-top: 1px solid #e9e9e7;
       flex-wrap: wrap;
-      flex-shrink: 0;
     }
     
     .btn {
@@ -346,42 +337,6 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
     
     .success.show {
       opacity: 1;
-    }
-    
-    /* Media queries for responsive scaling */
-    @media (max-width: 768px) {
-      .tile-wrapper {
-        width: 90%;
-      }
-      
-      .tile-block {
-        transform: scale(1.5);
-        width: 66.67%; /* 100 / 1.5 */
-      }
-    }
-    
-    @media (max-width: 480px) {
-      .tile-wrapper {
-        width: 95%;
-      }
-      
-      .tile-block {
-        transform: scale(1.2);
-        width: 83.33%; /* 100 / 1.2 */
-      }
-    }
-    
-    /* For very narrow views like Notion side peek */
-    @media (max-width: 380px) {
-      .tile-wrapper {
-        width: 100%;
-        padding: 10px;
-      }
-      
-      .tile-block {
-        transform: scale(1);
-        width: 100%;
-      }
     }
   </style>
 </head>
@@ -447,9 +402,8 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       const tileSection = document.querySelector('.tile-section');
       const tileWrapper = document.querySelector('.tile-wrapper');
       
-      // Get the current scale from computed styles
       const transform = window.getComputedStyle(tile).transform;
-      let scale = 4; // default
+      let scale = 1.85; // default
       
       if (transform && transform !== 'none') {
         const matrix = transform.match(/matrix\\(([^)]+)\\)/);
@@ -459,29 +413,22 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
         }
       }
       
-      // Calculate the actual height needed after scaling
       const actualHeight = tile.scrollHeight * scale;
       const wrapperPadding = parseInt(window.getComputedStyle(tileWrapper).paddingTop) + 
-                            parseInt(window.getComputedStyle(tileWrapper).paddingBottom);
+                             parseInt(window.getComputedStyle(tileWrapper).paddingBottom);
       
-      // Set the section height to accommodate scaled content
       tileSection.style.height = (actualHeight + wrapperPadding) + 'px';
       
-      // Ensure tile content is visible
       tile.style.visibility = 'visible';
     }
     
-    // Run scaling adjustment on load
     window.addEventListener('load', () => {
       adjustTileScaling();
-      // Run again after a short delay to ensure all styles are applied
       setTimeout(adjustTileScaling, 100);
     });
     
-    // Also run on resize
     window.addEventListener('resize', adjustTileScaling);
     
-    // Run when fonts load
     if (document.fonts) {
       document.fonts.ready.then(adjustTileScaling);
     }
@@ -575,7 +522,7 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       const tileContent = document.getElementById('tile').innerHTML;
       const modalContent = document.getElementById('modal').innerHTML;
       
-      const html = \`<!DOCTYPE html>
+      const html = \\\`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -592,12 +539,12 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
 </head>
 <body>
   <div class="container">
-    <div class="tile">\${tileContent}</div>
+    <div class="tile">\\\${tileContent}</div>
     <div class="divider"></div>
-    <div class="modal">\${modalContent}</div>
+    <div class="modal">\\\${modalContent}</div>
   </div>
 </body>
-</html>\`;
+</html>\\\`;
       
       const blob = new Blob([html], { type: 'text/html' });
       const link = document.createElement('a');

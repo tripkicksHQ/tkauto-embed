@@ -1,0 +1,61 @@
+*** Begin Patch
+*** Update File: app.js
+
+@@ /* Media queries for responsive scaling */
+-    /* Media queries for responsive scaling */
+-    @media (max-width: 768px) {
+-      .tile-wrapper {
+-        width: 90%;
+-      }
+-      
+-      .tile-block {
+-        transform: scale(1.5);
+-        width: 66.67%; /* 100 / 1.5 */
+-      }
+-    }
+-    
+-    @media (max-width: 480px) {
+-      .tile-wrapper {
+-        width: 95%;
+-      }
+-      
+-      .tile-block {
+-        transform: scale(1.2);
+-        width: 83.33%; /* 100 / 1.2 */
+-      }
+-    }
+-    
+-    /* For very narrow views like Notion side peek */
+-    @media (max-width: 380px) {
+-      .tile-wrapper {
+-        width: 100%;
+-        padding: 10px;
+-      }
+-      
+-      .tile-block {
+-        transform: scale(1);
+-        width: 100%;
+-      }
+-    }
++    /* Removed old .tile-wrapper / .tile-block media queries */
+
+*** End Patch ***
+
+*** Begin Patch
+*** Update File: app.js
+
+@@ // Event listeners
+-    document.getElementById('copyTile').onclick = () => copyImage('.tile-wrapper');
++    document.getElementById('copyTile').onclick = () => copyImage('.tile-section');
+
+*** End Patch ***
+
+*** Begin Patch
+*** Update File: app.js
+
+@@ function adjustTileScaling() {
+-      const tileWrapper = document.querySelector('.tile-wrapper');
++      // now point at your new inline wrapper (the second <div> inside .tile-section)
++      const tileWrapper = document.querySelector('.tile-section > div > div');
+
+*** End Patch ***
