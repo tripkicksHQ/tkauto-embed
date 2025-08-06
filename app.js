@@ -2,7 +2,6 @@
 require('dotenv').config();
 const express = require('express');
 const { Client } = require('@notionhq/client');
-
 const app = express();
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const PORT = process.env.PORT || 3000;
@@ -52,7 +51,6 @@ function extractPageIdFromUrl(url) {
     /notion\.so\/([a-f0-9]{32})/i,
     /notion\.site\/[^\/]+\/([a-f0-9]{32})/i
   ];
-  
   for (const pattern of patterns) {
     const match = url.match(pattern);
     if (match) {
@@ -66,29 +64,27 @@ function extractPageIdFromUrl(url) {
   return null;
 }
 
-// Connections embed route
+// Root route
 app.get("/", (req, res) => {
   res.send("tkAuto Embed App - Use /embed or /embed-builder");
 });
 
+// Connections embed route
 app.get('/embed', async (req, res) => {
   let liveTile = '', liveModal = '', errorMsg = '';
   let client = 'Client';
-  
   const referrer = req.get('Referrer') || req.get('Referer');
   let pageId = extractPageIdFromUrl(referrer);
-  
   if (!pageId && req.query.id) {
     pageId = req.query.id;
   }
-
+  
   try {
     if (!process.env.NOTION_TOKEN || !process.env.DATABASE_ID) {
       throw new Error('Missing environment variables');
     }
-
-    let page;
     
+    let page;
     if (pageId) {
       const searchResults = await notion.databases.query({
         database_id: process.env.DATABASE_ID,
@@ -101,11 +97,10 @@ app.get('/embed', async (req, res) => {
           }
         }
       });
-      
       if (searchResults.results.length > 0) {
         page = searchResults.results[0];
       }
-    } 
+    }
     
     if (!page) {
       const db = await notion.databases.query({
@@ -113,18 +108,16 @@ app.get('/embed', async (req, res) => {
         page_size: 1,
         sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }]
       });
-      
       if (db.results.length) {
         page = db.results[0];
       }
     }
-
+    
     if (page) {
       const tkid1Value = extractText(page.properties['tkid1']) || '';
       if (tkid1Value && tkid1Value.includes('.')) {
         client = tkid1Value.split('.')[0];
       }
-      
       liveTile = sanitizeHtml(extractHtml(page.properties['Tile HTML']));
       liveModal = sanitizeHtml(extractHtml(page.properties['Modal HTML']));
     }
@@ -132,10 +125,10 @@ app.get('/embed', async (req, res) => {
     console.error('Error:', e);
     errorMsg = `<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ${e.message}</div>`;
   }
-
+  
   if (!liveTile) liveTile = `<div style="color:#999; font-size:14px; padding:8px;">No tile content found</div>`;
   if (!liveModal) liveModal = `<div style="color:#999; font-size:14px; padding:8px;">No modal content found</div>`;
-
+  
   res.send(generateEmbed(liveTile, liveModal, client, false));
 });
 
@@ -143,21 +136,18 @@ app.get('/embed', async (req, res) => {
 app.get('/embed-builder', async (req, res) => {
   let liveTile = '', liveModal = '', errorMsg = '';
   let client = 'Client';
-  
   const referrer = req.get('Referrer') || req.get('Referer');
   let pageId = extractPageIdFromUrl(referrer);
-  
   if (!pageId && req.query.id) {
     pageId = req.query.id;
   }
-
+  
   try {
     if (!process.env.NOTION_TOKEN || !process.env.TKBUILDER_DATABASE_ID) {
       throw new Error('Missing environment variables');
     }
-
-    let page;
     
+    let page;
     if (pageId) {
       const searchResults = await notion.databases.query({
         database_id: process.env.TKBUILDER_DATABASE_ID,
@@ -170,7 +160,6 @@ app.get('/embed-builder', async (req, res) => {
           }
         }
       });
-      
       if (searchResults.results.length > 0) {
         page = searchResults.results[0];
       }
@@ -182,18 +171,16 @@ app.get('/embed-builder', async (req, res) => {
         page_size: 1,
         sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }]
       });
-      
       if (db.results.length) {
         page = db.results[0];
       }
     }
-
+    
     if (page) {
       const bldrIDValue = extractText(page.properties['bldrID']) || '';
       if (bldrIDValue && bldrIDValue.includes('.')) {
         client = bldrIDValue.split('.')[0];
       }
-      
       liveTile = sanitizeHtml(extractHtml(page.properties['TileContent']));
       liveModal = sanitizeHtml(extractHtml(page.properties['ModalContent']));
     }
@@ -201,10 +188,10 @@ app.get('/embed-builder', async (req, res) => {
     console.error('Error:', e);
     errorMsg = `<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ${e.message}</div>`;
   }
-
+  
   if (!liveTile) liveTile = `<div style="color:#999; font-size:14px; padding:8px;">No tile content found</div>`;
   if (!liveModal) liveModal = `<div style="color:#999; font-size:14px; padding:8px;">No modal content found</div>`;
-
+  
   res.send(generateEmbed(liveTile, liveModal, client, true));
 });
 
@@ -232,6 +219,7 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       line-height: 1.5;
       overflow-y: auto;
     }
+    
     .embed-container {
       width: 100%;
       min-height: 100vh;
@@ -241,7 +229,7 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       box-sizing: border-box;
     }
     
-    /* Tile section - properly sized container */
+    /* Tile section wrapper */
     .tile-section {
       width: 100%;
       position: relative;
@@ -249,29 +237,29 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       display: block;
       margin-bottom: 20px;
       clear: both;
-      overflow: hidden;
-      min-height: 400px; /* Ensure minimum height for tile section */
+      overflow: visible; /* Changed from hidden to visible */
+      /* Remove fixed min-height to allow dynamic sizing */
     }
     
-    /* The tile content wrapper with 2x scaling */
+    /* The tile wrapper for proper scaling */
+    .tile-wrapper {
+      width: 80%;
+      max-width: none;
+      margin: 0 auto;
+      padding: 20px 0;
+    }
+    
+    /* The tile content with scaling */
     .tile-block {
-      width: 100%;
-      padding: 0;
+      transform: scale(1.85);
+      transform-origin: top left;
+      width: 54.05%; /* 100 / 1.85 = 54.05% to compensate for scale */
+      margin-bottom: 2rem;
       box-sizing: border-box;
       display: block;
-      transform: scale(2);
-      transform-origin: top left;
-      /* The container needs to be 50% width to compensate for 2x scale */
-      width: 50%;
     }
     
-    /* Override clamp calculations for this context */
-    .tile-block * {
-      /* All text elements get proper sizing */
-      font-size: inherit !important;
-    }
-    
-    /* Ensure the tile content fills available space */
+    /* Ensure tile content fills available space */
     .tile-block > * {
       width: 100% !important;
       box-sizing: border-box !important;
@@ -317,6 +305,7 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       flex-wrap: wrap;
       flex-shrink: 0;
     }
+    
     .btn {
       background: #fff;
       border: 1px solid #d9d9d6;
@@ -330,13 +319,16 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       gap: 4px;
       transition: background 0.1s;
     }
+    
     .btn:hover {
       background: #f7f6f3;
     }
+    
     .btn svg {
       width: 14px;
       height: 14px;
     }
+    
     .success {
       position: fixed;
       top: 16px;
@@ -350,36 +342,62 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       transition: opacity 0.2s;
       z-index: 1000;
     }
+    
     .success.show {
       opacity: 1;
     }
     
-    /* Media query for very small viewports */
-    @media (max-width: 480px) {
-      .tile-block {
-        /* Adjust scaling for mobile if needed */
-        transform: scale(1.5);
-        width: 66.67%;
+    /* Media queries for responsive scaling */
+    @media (max-width: 768px) {
+      .tile-wrapper {
+        width: 90%;
       }
       
-      .tile-section {
-        min-height: 300px;
+      .tile-block {
+        transform: scale(1.5);
+        width: 66.67%; /* 100 / 1.5 */
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .tile-wrapper {
+        width: 95%;
+      }
+      
+      .tile-block {
+        transform: scale(1.2);
+        width: 83.33%; /* 100 / 1.2 */
+      }
+    }
+    
+    /* For very narrow views like Notion side peek */
+    @media (max-width: 380px) {
+      .tile-wrapper {
+        width: 100%;
+        padding: 10px;
+      }
+      
+      .tile-block {
+        transform: scale(1);
+        width: 100%;
       }
     }
   </style>
 </head>
 <body>
   <div class="success" id="success">Copied!</div>
+  
   <div class="embed-container">
     <div class="tile-section">
-      <div class="tile-block" id="tile">${liveTile}</div>
+      <div class="tile-wrapper">
+        <div class="tile-block" id="tile">${liveTile}</div>
+      </div>
     </div>
     
     <div class="divider"></div>
     
     <div class="modal-section">
       <div class="modal-block" id="modal">${liveModal}</div>
-      
       <div class="controls">
         <button class="btn" id="refresh">
           <i data-lucide="refresh-cw"></i>
@@ -420,18 +438,35 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       </div>
     </div>
   </div>
-
+  
   <script>
-    // Dynamically adjust tile scaling based on content
+    // Dynamically adjust tile section height based on scaled content
     function adjustTileScaling() {
       const tile = document.getElementById('tile');
       const tileSection = document.querySelector('.tile-section');
+      const tileWrapper = document.querySelector('.tile-wrapper');
       
-      // Calculate the actual height needed after 2x scaling
-      const tileHeight = tile.scrollHeight * 2;
-      tileSection.style.height = tileHeight + 'px';
+      // Get the current scale from computed styles
+      const transform = window.getComputedStyle(tile).transform;
+      let scale = 1.85; // default
       
-      // Ensure tile content is visible and properly positioned
+      if (transform && transform !== 'none') {
+        const matrix = transform.match(/matrix\\(([^)]+)\\)/);
+        if (matrix) {
+          const values = matrix[1].split(',');
+          scale = parseFloat(values[0]);
+        }
+      }
+      
+      // Calculate the actual height needed after scaling
+      const actualHeight = tile.scrollHeight * scale;
+      const wrapperPadding = parseInt(window.getComputedStyle(tileWrapper).paddingTop) + 
+                            parseInt(window.getComputedStyle(tileWrapper).paddingBottom);
+      
+      // Set the section height to accommodate scaled content
+      tileSection.style.height = (actualHeight + wrapperPadding) + 'px';
+      
+      // Ensure tile content is visible
       tile.style.visibility = 'visible';
     }
     
@@ -444,13 +479,18 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
     
     // Also run on resize
     window.addEventListener('resize', adjustTileScaling);
-
+    
+    // Run when fonts load
+    if (document.fonts) {
+      document.fonts.ready.then(adjustTileScaling);
+    }
+    
     function showSuccess() {
       const success = document.getElementById('success');
       success.classList.add('show');
       setTimeout(() => success.classList.remove('show'), 1500);
     }
-
+    
     async function captureElement(selector) {
       const element = document.querySelector(selector);
       if (!element) throw new Error('Element not found');
@@ -458,14 +498,15 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       const canvas = await html2canvas(element, {
         useCORS: true,
         backgroundColor: '#fff',
-        scale: 2
+        scale: 2,
+        logging: false
       });
       
       return new Promise(resolve => {
         canvas.toBlob(resolve, 'image/png');
       });
     }
-
+    
     async function copyImage(selector) {
       try {
         const blob = await captureElement(selector);
@@ -478,12 +519,11 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
         alert('Copy failed. Please try again.');
       }
     }
-
+    
     async function copyText(elementId) {
       try {
         const element = document.getElementById(elementId);
         if (!element) throw new Error('Element not found');
-        
         await navigator.clipboard.writeText(element.innerHTML);
         showSuccess();
       } catch (err) {
@@ -491,7 +531,7 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
         alert('Copy failed. Please try again.');
       }
     }
-
+    
     function saveHtml(elementId, filename) {
       try {
         const element = document.getElementById(elementId);
@@ -506,11 +546,10 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
   <link href="https://info.tripkicks.com/hubfs/system/mockup/tk-css.css" rel="stylesheet">
   <style>
     body { margin: 0; padding: 20px; font-family: system-ui; }
-    .content { 
+    .content {
       \${elementId === 'tile' ? 
         'background: #156eff; color: #fff; padding: 0.5em; border-radius: 4px;' : 
-        'background: #fff; border: 1px solid #ddd; padding: 1em; border-radius: 4px;'
-      }
+        'background: #fff; border: 1px solid #ddd; padding: 1em; border-radius: 4px;'}
     }
   </style>
 </head>
@@ -530,7 +569,7 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
         alert('Save failed. Please try again.');
       }
     }
-
+    
     function exportFullHtml() {
       const tileContent = document.getElementById('tile').innerHTML;
       const modalContent = document.getElementById('modal').innerHTML;
@@ -566,10 +605,10 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       link.click();
       URL.revokeObjectURL(link.href);
     }
-
+    
     // Event listeners
     document.getElementById('refresh').onclick = () => window.location.reload();
-    document.getElementById('copyTile').onclick = () => copyImage('.tile-section');
+    document.getElementById('copyTile').onclick = () => copyImage('.tile-wrapper');
     document.getElementById('copyModal').onclick = () => copyImage('#modal');
     document.getElementById('copyBoth').onclick = () => copyImage('.embed-container');
     document.getElementById('exportHtml').onclick = exportFullHtml;
@@ -577,7 +616,7 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
     document.getElementById('saveModalHtml').onclick = () => saveHtml('modal', '${client}_modal');
     document.getElementById('copyTileCode').onclick = () => copyText('tile');
     document.getElementById('copyModalCode').onclick = () => copyText('modal');
-
+    
     // Initialize icons
     if (typeof lucide !== 'undefined') {
       lucide.createIcons();
