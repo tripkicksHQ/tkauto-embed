@@ -230,40 +230,41 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
     }
     
     /* Tile section wrapper */
-    .tile-section {
-      width: 100%;
-      position: relative;
-      flex-shrink: 0;
-      display: block;
-      margin-bottom: 20px;
-      clear: both;
-      overflow: visible; /* Changed from hidden to visible */
-      /* Remove fixed min-height to allow dynamic sizing */
-    }
-    
-    /* The tile wrapper for proper scaling */
-    .tile-wrapper {
-      width: 80%;
-      max-width: none;
-      margin: 0 auto;
-      padding: 20px 0;
-    }
-    
-    /* The tile content with scaling */
-    .tile-block {
-      transform: scale(1.85);
-      transform-origin: top left;
-      width: 54.05%; /* 100 / 1.85 = 54.05% to compensate for scale */
-      margin-bottom: 2rem;
-      box-sizing: border-box;
-      display: block;
-    }
-    
-    /* Ensure tile content fills available space */
-    .tile-block > * {
-      width: 100% !important;
-      box-sizing: border-box !important;
-    }
+.tile-section {
+  width: 100%;
+  position: relative;
+  flex-shrink: 0;
+  display: block;
+  margin-bottom: 20px;
+  clear: both;
+  overflow: visible;
+  min-height: 200px;
+}
+
+/* The tile wrapper for proper scaling */
+.tile-wrapper {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 10px;
+}
+
+/* The tile content with MUCH larger scaling */
+.tile-block {
+  transform: scale(4);
+  transform-origin: top left;
+  width: 25%; /* 100 / 4 = 25% to compensate for scale */
+  margin-bottom: 2rem;
+  box-sizing: border-box;
+  display: block;
+}
+
+/* Override any max-width constraints */
+.tile-block > * {
+  width: 100% !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+}
     
     .divider {
       height: 1px;
@@ -448,7 +449,7 @@ function generateEmbed(liveTile, liveModal, client, isBuilder) {
       
       // Get the current scale from computed styles
       const transform = window.getComputedStyle(tile).transform;
-      let scale = 1.85; // default
+      let scale = 4; // default
       
       if (transform && transform !== 'none') {
         const matrix = transform.match(/matrix\\(([^)]+)\\)/);
