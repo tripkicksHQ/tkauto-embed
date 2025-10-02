@@ -109,13 +109,10 @@ app.get('/embed', async (req, res) => {
     if (!targetTkid) {
       // Fallback - search through pages to find one with content
       const db = await withTimeout(
-        notion.request({
-          path: `databases/${DATABASE_ID}/query`,
-          method: 'POST',
-          body: {
+        notion.databases.query({
+          database_id: DATABASE_ID,
             page_size: 10,
-          }
-        }),
+          }),
         8000,
         'Notion query (fallback list)'
       );
@@ -141,16 +138,13 @@ app.get('/embed', async (req, res) => {
       // Search for page with matching TK id
       try {
         const searchResults = await withTimeout(
-          notion.request({
-            path: `databases/${DATABASE_ID}/query`,
-            method: 'POST',
-            body: {
+          notion.databases.query({
+          database_id: DATABASE_ID,
               filter: {
                 property: 'TK id',
                 rich_text: { equals: targetTkid },
               },
-            }
-          }),
+            }),
           8000,
           'Notion query (TK id)'
         );
@@ -161,16 +155,13 @@ app.get('/embed', async (req, res) => {
         } else {
           // Try TK id Temp formula
           const tempResults = await withTimeout(
-            notion.request({
-              path: `databases/${DATABASE_ID}/query`,
-              method: 'POST',
-              body: {
+            notion.databases.query({
+          database_id: DATABASE_ID,
                 filter: {
                   property: 'TK id Temp',
                   formula: { string: { equals: targetTkid } },
                 },
-              }
-            }),
+              }),
             8000,
             'Notion query (TK id Temp)'
           );
@@ -268,13 +259,10 @@ app.get('/modal', async (req, res) => {
 
     if (!targetTkid) {
       const db = await withTimeout(
-        notion.request({
-          path: `databases/${DATABASE_ID}/query`,
-          method: 'POST',
-          body: {
+        notion.databases.query({
+          database_id: DATABASE_ID,
             page_size: 10,
-          }
-        }),
+          }),
         8000,
         'Notion query (modal fallback list)'
       );
@@ -299,16 +287,13 @@ app.get('/modal', async (req, res) => {
     } else {
       try {
         const searchResults = await withTimeout(
-          notion.request({
-            path: `databases/${DATABASE_ID}/query`,
-            method: 'POST',
-            body: {
+          notion.databases.query({
+          database_id: DATABASE_ID,
               filter: {
                 property: 'TK id',
                 rich_text: { equals: targetTkid },
               },
-            }
-          }),
+            }),
           8000,
           'Notion query (modal TK id)'
         );
@@ -318,16 +303,13 @@ app.get('/modal', async (req, res) => {
           console.log('Found page by TK id match for modal:', targetTkid);
         } else {
           const tempResults = await withTimeout(
-            notion.request({
-              path: `databases/${DATABASE_ID}/query`,
-              method: 'POST',
-              body: {
+            notion.databases.query({
+          database_id: DATABASE_ID,
                 filter: {
                   property: 'TK id Temp',
                   formula: { string: { equals: targetTkid } },
                 },
-              }
-            }),
+              }),
             8000,
             'Notion query (modal TK id Temp)'
           );
