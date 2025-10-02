@@ -4,6 +4,7 @@ const express = require('express');
 const { Client } = require('@notionhq/client');
 const app = express();
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
+const DATABASE_ID = (process.env.DATABASE_ID || "").trim();
 const PORT = process.env.PORT || 3000;
 
 /* ---------------------------
@@ -89,16 +90,16 @@ app.get('/embed', async (req, res) => {
   console.log('Embed request:', {
     referrer,
     pageId,
-    databaseId: process.env.DATABASE_ID ? 'exists' : 'missing',
-    fullDatabaseId: process.env.DATABASE_ID,
+    databaseId: DATABASE_ID ? 'exists' : 'missing',
+    fullDatabaseId: DATABASE_ID,
   });
 
   try {
-    if (!process.env.NOTION_TOKEN || !process.env.DATABASE_ID) {
+    if (!process.env.NOTION_TOKEN || !DATABASE_ID) {
       throw new Error(
         'Missing environment variables: ' +
           (!process.env.NOTION_TOKEN ? 'NOTION_TOKEN ' : '') +
-          (!process.env.DATABASE_ID ? 'DATABASE_ID' : '')
+          (!DATABASE_ID ? 'DATABASE_ID' : '')
       );
     }
 
@@ -109,7 +110,7 @@ app.get('/embed', async (req, res) => {
       // Fallback - search through pages to find one with content
       const db = await withTimeout(
         notion.request({
-          path: `databases/${process.env.DATABASE_ID}/query`,
+          path: `databases/${DATABASE_ID}/query`,
           method: 'POST',
           body: {
             page_size: 10,
@@ -141,7 +142,7 @@ app.get('/embed', async (req, res) => {
       try {
         const searchResults = await withTimeout(
           notion.request({
-            path: `databases/${process.env.DATABASE_ID}/query`,
+            path: `databases/${DATABASE_ID}/query`,
             method: 'POST',
             body: {
               filter: {
@@ -161,7 +162,7 @@ app.get('/embed', async (req, res) => {
           // Try TK id Temp formula
           const tempResults = await withTimeout(
             notion.request({
-              path: `databases/${process.env.DATABASE_ID}/query`,
+              path: `databases/${DATABASE_ID}/query`,
               method: 'POST',
               body: {
                 filter: {
@@ -249,16 +250,16 @@ app.get('/modal', async (req, res) => {
   console.log('Modal request:', {
     referrer,
     pageId,
-    databaseId: process.env.DATABASE_ID ? 'exists' : 'missing',
-    fullDatabaseId: process.env.DATABASE_ID,
+    databaseId: DATABASE_ID ? 'exists' : 'missing',
+    fullDatabaseId: DATABASE_ID,
   });
 
   try {
-    if (!process.env.NOTION_TOKEN || !process.env.DATABASE_ID) {
+    if (!process.env.NOTION_TOKEN || !DATABASE_ID) {
       throw new Error(
         'Missing environment variables: ' +
           (!process.env.NOTION_TOKEN ? 'NOTION_TOKEN ' : '') +
-          (!process.env.DATABASE_ID ? 'DATABASE_ID' : '')
+          (!DATABASE_ID ? 'DATABASE_ID' : '')
       );
     }
 
@@ -268,7 +269,7 @@ app.get('/modal', async (req, res) => {
     if (!targetTkid) {
       const db = await withTimeout(
         notion.request({
-          path: `databases/${process.env.DATABASE_ID}/query`,
+          path: `databases/${DATABASE_ID}/query`,
           method: 'POST',
           body: {
             page_size: 10,
@@ -299,7 +300,7 @@ app.get('/modal', async (req, res) => {
       try {
         const searchResults = await withTimeout(
           notion.request({
-            path: `databases/${process.env.DATABASE_ID}/query`,
+            path: `databases/${DATABASE_ID}/query`,
             method: 'POST',
             body: {
               filter: {
@@ -318,7 +319,7 @@ app.get('/modal', async (req, res) => {
         } else {
           const tempResults = await withTimeout(
             notion.request({
-              path: `databases/${process.env.DATABASE_ID}/query`,
+              path: `databases/${DATABASE_ID}/query`,
               method: 'POST',
               body: {
                 filter: {
