@@ -2,8 +2,13 @@
 require('dotenv').config();
 const express = require('express');
 const { Client } = require('@notionhq/client');
+
 const app = express();
-const notion = new Client({ auth: process.env.NOTION_TOKEN });
+const notion = new Client({
+  auth: process.env.NOTION_TOKEN,
+  notionVersion: '2025-09-03' // Using the future-proof API version
+});
+
 const DATABASE_ID = (process.env.DATABASE_ID || "").trim();
 const PORT = process.env.PORT || 3000;
 
@@ -28,17 +33,15 @@ function extractHtml(prop) {
       return prop.title.map(rt => rt.plain_text).join('');
     case 'formula':
       return prop.formula.string || '';
-    case 'plain_text':
-      return prop.plain_text || '';
     default:
-      return '';
+      return prop.plain_text || '';
   }
 }
 
 function extractText(prop) {
   if (!prop) return '';
-  if (prop.type === 'title' && prop.title.length) return prop.title[0].plain_text;
-  if (prop.type === 'rich_text' && prop.rich_text.length) return prop.rich_text[0].plain_text;
+  if (prop.type === 'title' && prop.title.length > 0) return prop.title[0].plain_text;
+  if (prop.type === 'rich_text' && prop.rich_text.length > 0) return prop.rich_text[0].plain_text;
   if (prop.type === 'formula') {
     if (prop.formula.type === 'string' && prop.formula.string !== null) return prop.formula.string;
     if (prop.formula.type === 'number' && prop.formula.number !== null) return String(prop.formula.number);
@@ -53,19 +56,52 @@ function sanitizeHtml(html) {
     .replace(/on\w+\s*=/gi, '');
 }
 
-function extractPageIdFromUrl(url) {
-  if (!url) return null;
-  const patterns = [
-    /notion\.so\/[^/]+\/([a-f0-9-]{32,36})/i,
-    /notion\.so\/([a-f0-9-]{32,36})/i,
-    /notion\.site\/[^/]+\/([a-f0-9-]{32,36})/i,
-  ];
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) return match[1];
+/* ---------------------------
+   General Page Fetcher
+---------------------------- */
+
+// Define all properties the app might need.
+// The 2025-09-03 API requires these to be explicitly requested.
+const requiredProperties = [
+    'TK id', 'TK id Temp', 'Tile_Content', 'Tile HTML', 
+    'TileContent', 'Tile Content', 'Tile', 'HTML', 
+    'Modal HTML', 'ModalContent', 'Modal_Content', 'Modal Content', 'Modal'
+];
+
+async function findNotionPageByTkId(tkid) {
+  const response = await withTimeout(
+    notion.databases.query({
+      database_id: DATABASE_ID,
+      properties: requiredProperties, // Explicitly request properties
+      filter: {
+        or: [{
+          property: 'TK id',
+          rich_text: {
+            equals: tkid
+          },
+        }, {
+          property: 'TK id Temp',
+          formula: {
+            string: {
+              equals: tkid
+            }
+          },
+        }, ],
+      },
+    }),
+    8000,
+    'Notion query by TK id'
+  );
+
+  if (response.results.length > 0) {
+    console.log(`Found page matching tkid: '${tkid}'`);
+    return response.results[0];
   }
+
+  console.log(`No page found matching tkid: '${tkid}'`);
   return null;
 }
+
 
 /* ---------------------------
    Routes
@@ -73,150 +109,57 @@ function extractPageIdFromUrl(url) {
 
 // Root route
 app.get('/', (req, res) => {
-  res.send('tkAuto Embed App - Use /embed');
+  res.send('tkAuto Embed App - Use /embed or /modal');
 });
 
-// Main embed route - displays live Tile HTML from tkConnectionsDB
+// Main embed route - displays live Tile HTML
 app.get('/embed', async (req, res) => {
-  let liveTile = '', errorMsg = '';
+  let liveTile = '';
+  let errorMsg = '';
   let client = 'Client';
-  const referrer = req.get('Referrer') || req.get('Referer');
-  let pageId = extractPageIdFromUrl(referrer);
-
-  if (!pageId && req.query.id) {
-    pageId = req.query.id;
-  }
-
-  console.log('Embed request:', {
-    referrer,
-    pageId,
-    databaseId: DATABASE_ID ? 'exists' : 'missing',
-    fullDatabaseId: DATABASE_ID,
-  });
 
   try {
     if (!process.env.NOTION_TOKEN || !DATABASE_ID) {
-      throw new Error(
-        'Missing environment variables: ' +
-          (!process.env.NOTION_TOKEN ? 'NOTION_TOKEN ' : '') +
-          (!DATABASE_ID ? 'DATABASE_ID' : '')
-      );
+      throw new Error('Missing NOTION_TOKEN or DATABASE_ID in environment variables.');
+    }
+
+    const targetTkid = req.query.tkid;
+    if (!targetTkid) {
+      throw new Error('Missing tkid parameter. Please use a URL like /embed?tkid=YOUR_ID');
     }
     
-    let targetTkid = req.query.tkid || pageId;
-    let page;
-
-    if (!targetTkid) {
-      // Fallback - search through pages to find one with content
-      const db = await withTimeout(
-        notion.databases.query({
-          database_id: DATABASE_ID,
-          page_size: 10,
-        }),
-        8000,
-        'Notion query (fallback list)'
-      );
-
-      console.log('Using fallback - searching through', db.results.length, 'pages');
-
-      for (const result of db.results) {
-        const tkId = extractText(result.properties['TK id']) || '';
-        const tkIdTemp = extractText(result.properties['TK id Temp']) || '';
-        const tileContent = extractHtml(result.properties['Tile_Content']) || '';
-        if ((tkId || tkIdTemp) && tileContent.length > 0) {
-          page = result;
-          console.log('Found page with ID:', tkId || tkIdTemp);
-          break;
-        }
-      }
-
-      if (!page && db.results.length) {
-        page = db.results[0];
-        console.log('Using first page as fallback:', page.id);
-      }
-    } else {
-      // Search for page with matching TK id
-      try {
-        const searchResults = await withTimeout(
-          notion.databases.query({
-            database_id: DATABASE_ID,
-            filter: {
-              property: 'TK id',
-              rich_text: { equals: targetTkid },
-            },
-          }),
-          8000,
-          'Notion query (TK id)'
-        );
-
-        if (searchResults.results.length > 0) {
-          page = searchResults.results[0];
-          console.log('Found page by TK id match:', targetTkid);
-        } else {
-          // Try TK id Temp formula
-          const tempResults = await withTimeout(
-            notion.databases.query({
-              database_id: DATABASE_ID,
-              filter: {
-                property: 'TK id Temp',
-                formula: { string: { equals: targetTkid } },
-              },
-            }),
-            8000,
-            'Notion query (TK id Temp)'
-          );
-
-          if (tempResults.results.length > 0) {
-            page = tempResults.results[0];
-            console.log('Found page by TK id Temp match:', targetTkid);
-          }
-        }
-      } catch (e) {
-        console.log('Error searching for tkid:', e.message);
-      }
-    }
+    console.log(`Embed request for tkid: '${targetTkid}'`);
+    const page = await findNotionPageByTkId(targetTkid);
 
     if (page && page.properties) {
-      console.log('Page found, ID:', page.id);
-      console.log('Page properties:', Object.keys(page.properties));
-
-      // Get client from TK id or TK id Temp
-      const tkIdValue =
-        extractText(page.properties['TK id']) ||
-        extractText(page.properties['TK id Temp']) ||
-        '';
+      const tkIdValue = extractText(page.properties['TK id']) || extractText(page.properties['TK id Temp']) || '';
       if (tkIdValue && tkIdValue.includes('.')) {
         client = tkIdValue.split('.')[0];
       }
 
-      // Try multiple possible property names for tile content
       const possibleTileProps = ['Tile_Content', 'Tile HTML', 'TileContent', 'Tile Content', 'Tile', 'HTML'];
-
       for (const propName of possibleTileProps) {
         if (page.properties[propName]) {
           liveTile = sanitizeHtml(extractHtml(page.properties[propName]));
-          console.log("Found content in property '" + propName + "', length:", liveTile.length);
+          console.log(`Found content in property '${propName}', length: ${liveTile.length}`);
           break;
         }
       }
 
       if (!liveTile) {
-        console.log('No content found. TK id:', tkIdValue);
-        console.log('Available properties:', JSON.stringify(Object.keys(page.properties)));
-        errorMsg =
-          'Page found but no tile content. Available properties: ' +
-          Object.keys(page.properties).join(', ');
+        errorMsg = `Page found for tkid '${targetTkid}' but no tile content property was found.`;
+        console.log(errorMsg);
       }
     } else {
-      console.log('No page found or page has no properties');
-      errorMsg = 'No page found in database';
+      errorMsg = `No page found in database for tkid '${targetTkid}'.`;
+      console.log(errorMsg);
     }
   } catch (e) {
-    console.error('Error:', e);
-    errorMsg = '<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ' + e.message + '</div>';
+    console.error('Error in /embed route:', e);
+    errorMsg = `<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ${e.message}</div>`;
   }
 
-  if (errorMsg) {
+  if (errorMsg && !liveTile) {
     liveTile = errorMsg;
   }
   if (!liveTile) {
@@ -227,147 +170,55 @@ app.get('/embed', async (req, res) => {
   res.send(generateEmbed(liveTile, client, false));
 });
 
+
 // Modal embed route - displays Modal HTML only
 app.get('/modal', async (req, res) => {
-  let liveModal = '', errorMsg = '';
+  let liveModal = '';
+  let errorMsg = '';
   let client = 'Client';
-  const referrer = req.get('Referrer') || req.get('Referer');
-  let pageId = extractPageIdFromUrl(referrer);
-
-  if (!pageId && req.query.id) {
-    pageId = req.query.id;
-  }
-
-  console.log('Modal request:', {
-    referrer,
-    pageId,
-    databaseId: DATABASE_ID ? 'exists' : 'missing',
-    fullDatabaseId: DATABASE_ID,
-  });
 
   try {
     if (!process.env.NOTION_TOKEN || !DATABASE_ID) {
-      throw new Error(
-        'Missing environment variables: ' +
-          (!process.env.NOTION_TOKEN ? 'NOTION_TOKEN ' : '') +
-          (!DATABASE_ID ? 'DATABASE_ID' : '')
-      );
+      throw new Error('Missing NOTION_TOKEN or DATABASE_ID in environment variables.');
     }
 
-    let page;
-    let targetTkid = req.query.tkid || pageId;
-
+    const targetTkid = req.query.tkid;
     if (!targetTkid) {
-      // Fallback - search through pages to find one with modal content
-      const db = await withTimeout(
-        notion.databases.query({
-          database_id: DATABASE_ID,
-          page_size: 10,
-        }),
-        8000,
-        'Notion query (modal fallback list)'
-      );
-
-      console.log('Using fallback for modal - searching through', db.results.length, 'pages');
-
-      for (const result of db.results) {
-        const tkId = extractText(result.properties['TK id']) || '';
-        const tkIdTemp = extractText(result.properties['TK id Temp']) || '';
-        const modalContent = extractHtml(result.properties['Modal HTML']) || '';
-        if ((tkId || tkIdTemp) && modalContent.length > 0) {
-          page = result;
-          console.log('Found page with modal and ID:', tkId || tkIdTemp);
-          break;
-        }
-      }
-
-      if (!page && db.results.length) {
-        page = db.results[0];
-        console.log('Using first page as fallback for modal:', page.id);
-      }
-    } else {
-      // Search for page with matching TK id
-      try {
-        const searchResults = await withTimeout(
-          notion.databases.query({
-            database_id: DATABASE_ID,
-            filter: {
-              property: 'TK id',
-              rich_text: { equals: targetTkid },
-            },
-          }),
-          8000,
-          'Notion query (modal TK id)'
-        );
-
-        if (searchResults.results.length > 0) {
-          page = searchResults.results[0];
-          console.log('Found page by TK id match for modal:', targetTkid);
-        } else {
-          // Try TK id Temp formula
-          const tempResults = await withTimeout(
-            notion.databases.query({
-              database_id: DATABASE_ID,
-              filter: {
-                property: 'TK id Temp',
-                formula: { string: { equals: targetTkid } },
-              },
-            }),
-            8000,
-            'Notion query (modal TK id Temp)'
-          );
-
-          if (tempResults.results.length > 0) {
-            page = tempResults.results[0];
-            console.log('Found page by TK id Temp match for modal:', targetTkid);
-          }
-        }
-      } catch (e) {
-        console.log('Error searching for tkid (modal):', e.message);
-      }
+      throw new Error('Missing tkid parameter. Please use a URL like /modal?tkid=YOUR_ID');
     }
+    
+    console.log(`Modal request for tkid: '${targetTkid}'`);
+    const page = await findNotionPageByTkId(targetTkid);
 
     if (page && page.properties) {
-      console.log('Page found for modal, ID:', page.id);
-      console.log('Page properties:', Object.keys(page.properties));
-
-      // Get client from TK id or TK id Temp
-      const tkIdValue =
-        extractText(page.properties['TK id']) ||
-        extractText(page.properties['TK id Temp']) ||
-        '';
+      const tkIdValue = extractText(page.properties['TK id']) || extractText(page.properties['TK id Temp']) || '';
       if (tkIdValue && tkIdValue.includes('.')) {
         client = tkIdValue.split('.')[0];
       }
 
-      // Try multiple possible property names for modal content
       const possibleModalProps = ['Modal HTML', 'ModalContent', 'Modal_Content', 'Modal Content', 'Modal'];
-
       for (const propName of possibleModalProps) {
         if (page.properties[propName]) {
           liveModal = sanitizeHtml(extractHtml(page.properties[propName]));
-          console.log("Found modal content in property '" + propName + "', length:", liveModal.length);
+          console.log(`Found modal content in property '${propName}', length: ${liveModal.length}`);
           break;
         }
       }
 
       if (!liveModal) {
-        console.log('No modal content found. TK id:', tkIdValue);
-        console.log('Available properties:', JSON.stringify(Object.keys(page.properties)));
-        errorMsg =
-          'Page found but no modal content. Available properties: ' +
-          Object.keys(page.properties).join(', ');
+        errorMsg = `Page found for tkid '${targetTkid}' but no modal content property was found.`;
+        console.log(errorMsg);
       }
     } else {
-      console.log('No page found or page has no properties');
-      errorMsg = 'No page found in database';
+      errorMsg = `No page found in database for tkid '${targetTkid}'.`;
+      console.log(errorMsg);
     }
   } catch (e) {
-    console.error('Error:', e);
-    errorMsg = '<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ' + e.message + '</div>';
+    console.error('Error in /modal route:', e);
+    errorMsg = `<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ${e.message}</div>`;
   }
 
-  if (errorMsg) {
+  if (errorMsg && !liveModal) {
     liveModal = errorMsg;
   }
   if (!liveModal) {
@@ -378,10 +229,11 @@ app.get('/modal', async (req, res) => {
   res.send(generateEmbed(liveModal, client, true));
 });
 
+
 /* ---------------------------
    HTML generator
 ---------------------------- */
-function generateEmbed(liveTile, client, isModal = false) {
+function generateEmbed(liveContent, client, isModal = false) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -467,7 +319,7 @@ function generateEmbed(liveTile, client, isModal = false) {
       padding: 4px 8px;
       font-size: 9px;
       cursor: pointer;
-      color: #d3d3d3;
+      color: #37352f;
       display: flex;
       align-items: center;
       gap: 4px;
@@ -503,7 +355,7 @@ function generateEmbed(liveTile, client, isModal = false) {
   <div class="embed-container${isModal ? ' modal-container' : ''}">
     <div class="tile-section">
       <div class="tile-wrapper">
-        <div class="tile-block" id="tile">${liveTile}</div>
+        <div class="tile-block" id="tile">${liveContent}</div>
       </div>
     </div>
     <div class="controls">
@@ -542,6 +394,7 @@ function generateEmbed(liveTile, client, isModal = false) {
 
     function adjustTileHeight() {
       var tile = document.getElementById('tile');
+      if (!tile) return;
       var tileSection = document.querySelector('.tile-section');
       var tileWrapper = document.querySelector('.tile-wrapper');
       var embedContainer = document.querySelector('.embed-container');
@@ -564,7 +417,7 @@ function generateEmbed(liveTile, client, isModal = false) {
 
       tile.style.transform = 'scale(' + scale + ')';
       tile.style.width = (100 / scale) + '%';
-      tile.offsetHeight;
+      tile.offsetHeight; // force repaint
 
       var actualHeight = tile.scrollHeight * scale;
       var cs = window.getComputedStyle(tileWrapper);
@@ -641,37 +494,27 @@ function generateEmbed(liveTile, client, isModal = false) {
       if (!el) return;
       var text = el.innerHTML;
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(showSuccess).catch(function () {
-          var ta = document.createElement('textarea');
-          ta.value = text;
-          ta.style.position = 'fixed';
-          ta.style.opacity = '0';
-          document.body.appendChild(ta);
-          ta.select();
-          try { document.execCommand('copy'); } catch (e) {}
-          document.body.removeChild(ta);
-          showSuccess();
+        navigator.clipboard.writeText(text).then(showSuccess).catch(function (err){
+          console.error('Fallback copy failed', err);
         });
       }
     }
 
     function copyImageFrom(selector) {
       captureElement(selector)
-        .then(function (canvas) { return copyCanvasToClipboard(canvas); })
-        .then(function () { showSuccess(); })
+        .then(copyCanvasToClipboard)
+        .then(showSuccess)
         .catch(function (err) {
-          captureElement(selector)
-            .then(function (canvas) { return downloadCanvasPNG(canvas, 'tile.png'); })
-            .then(function () { showSuccess(); })
-            .catch(function (e) { alert('Failed: ' + (e && e.message ? e.message : e)); });
+          console.error('Copy image failed, falling back to download.', err);
+          downloadImageFrom(selector);
         });
     }
 
     function downloadImageFrom(selector) {
       captureElement(selector)
-        .then(function (canvas) { return downloadCanvasPNG(canvas, 'tile.png'); })
-        .then(function () { showSuccess(); })
-        .catch(function (e) { alert('Failed: ' + (e && e.message ? e.message : e)); });
+        .then(canvas => downloadCanvasPNG(canvas, 'tile.png'))
+        .then(showSuccess)
+        .catch(function(e) { console.error('Download failed', e); });
     }
 
     var btnRefresh = document.getElementById('refresh');
