@@ -9,7 +9,8 @@ const notion = new Client({
   notionVersion: '2025-09-03' // Using the future-proof API version
 });
 
-const DATABASE_ID = (process.env.DATABASE_ID || "").trim();
+// The fix: This line now removes all hyphens to ensure the ID is always correctly formatted.
+const DATABASE_ID = (process.env.DATABASE_ID || "").replace(/-/g, "").trim();
 const PORT = process.env.PORT || 3000;
 
 /* ---------------------------
@@ -59,9 +60,6 @@ function sanitizeHtml(html) {
 /* ---------------------------
    General Page Fetcher
 ---------------------------- */
-
-// Define all properties the app might need.
-// The 2025-09-03 API requires these to be explicitly requested.
 const requiredProperties = [
     'TK id', 'TK id Temp', 'Tile_Content', 'Tile HTML', 
     'TileContent', 'Tile Content', 'Tile', 'HTML', 
@@ -72,7 +70,7 @@ async function findNotionPageByTkId(tkid) {
   const response = await withTimeout(
     notion.databases.query({
       database_id: DATABASE_ID,
-      properties: requiredProperties, // Explicitly request properties
+      properties: requiredProperties,
       filter: {
         or: [{
           property: 'TK id',
@@ -102,27 +100,21 @@ async function findNotionPageByTkId(tkid) {
   return null;
 }
 
-
 /* ---------------------------
    Routes
 ---------------------------- */
-
-// Root route
 app.get('/', (req, res) => {
   res.send('tkAuto Embed App - Use /embed or /modal');
 });
 
-// Main embed route - displays live Tile HTML
 app.get('/embed', async (req, res) => {
-  let liveTile = '';
-  let errorMsg = '';
+  let liveTile = '', errorMsg = '';
   let client = 'Client';
 
   try {
     if (!process.env.NOTION_TOKEN || !DATABASE_ID) {
       throw new Error('Missing NOTION_TOKEN or DATABASE_ID in environment variables.');
     }
-
     const targetTkid = req.query.tkid;
     if (!targetTkid) {
       throw new Error('Missing tkid parameter. Please use a URL like /embed?tkid=YOUR_ID');
@@ -136,7 +128,6 @@ app.get('/embed', async (req, res) => {
       if (tkIdValue && tkIdValue.includes('.')) {
         client = tkIdValue.split('.')[0];
       }
-
       const possibleTileProps = ['Tile_Content', 'Tile HTML', 'TileContent', 'Tile Content', 'Tile', 'HTML'];
       for (const propName of possibleTileProps) {
         if (page.properties[propName]) {
@@ -145,7 +136,6 @@ app.get('/embed', async (req, res) => {
           break;
         }
       }
-
       if (!liveTile) {
         errorMsg = `Page found for tkid '${targetTkid}' but no tile content property was found.`;
         console.log(errorMsg);
@@ -159,29 +149,20 @@ app.get('/embed', async (req, res) => {
     errorMsg = `<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ${e.message}</div>`;
   }
 
-  if (errorMsg && !liveTile) {
-    liveTile = errorMsg;
-  }
-  if (!liveTile) {
-    liveTile = '<div style="color:#999; font-size:14px; padding:8px;">No tile content found</div>';
-  }
-
+  if (errorMsg && !liveTile) liveTile = errorMsg;
+  if (!liveTile) liveTile = '<div style="color:#999; font-size:14px; padding:8px;">No tile content found</div>';
   res.set('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
   res.send(generateEmbed(liveTile, client, false));
 });
 
-
-// Modal embed route - displays Modal HTML only
 app.get('/modal', async (req, res) => {
-  let liveModal = '';
-  let errorMsg = '';
+  let liveModal = '', errorMsg = '';
   let client = 'Client';
 
   try {
     if (!process.env.NOTION_TOKEN || !DATABASE_ID) {
       throw new Error('Missing NOTION_TOKEN or DATABASE_ID in environment variables.');
     }
-
     const targetTkid = req.query.tkid;
     if (!targetTkid) {
       throw new Error('Missing tkid parameter. Please use a URL like /modal?tkid=YOUR_ID');
@@ -195,7 +176,6 @@ app.get('/modal', async (req, res) => {
       if (tkIdValue && tkIdValue.includes('.')) {
         client = tkIdValue.split('.')[0];
       }
-
       const possibleModalProps = ['Modal HTML', 'ModalContent', 'Modal_Content', 'Modal Content', 'Modal'];
       for (const propName of possibleModalProps) {
         if (page.properties[propName]) {
@@ -204,7 +184,6 @@ app.get('/modal', async (req, res) => {
           break;
         }
       }
-
       if (!liveModal) {
         errorMsg = `Page found for tkid '${targetTkid}' but no modal content property was found.`;
         console.log(errorMsg);
@@ -218,17 +197,11 @@ app.get('/modal', async (req, res) => {
     errorMsg = `<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ${e.message}</div>`;
   }
 
-  if (errorMsg && !liveModal) {
-    liveModal = errorMsg;
-  }
-  if (!liveModal) {
-    liveModal = '<div style="color:#999; font-size:14px; padding:8px;">No modal content found</div>';
-  }
-
-  res.set('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
+  if (errorMsg && !liveModal) liveModal = errorMsg;
+  if (!liveModal) liveModal = '<div style="color:#999; font-size:14px; padding:8px;">No modal content found</div>';
+  res.set('Cache-control', 's-maxage=60, stale-while-revalidate=300');
   res.send(generateEmbed(liveModal, client, true));
 });
-
 
 /* ---------------------------
    HTML generator
@@ -245,109 +218,20 @@ function generateEmbed(liveContent, client, isModal = false) {
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif;
-      background: #fff;
-      color: #37352f;
-      line-height: 1.5;
-      overflow-x: hidden;
-      height: auto;
-      min-height: 100%;
-    }
-    .embed-container {
-      width: 100%;
-      min-height: 400px;
-      display: flex;
-      flex-direction: column;
-      box-sizing: border-box;
-      padding-bottom: 0;
-      background: transparent;
-    }
-    .embed-container.modal-container {
-      min-height: 1800px;
-      height: 1800px;
-      padding-bottom: 1000px;
-    }
-    .tile-section {
-      width: 100%;
-      box-sizing: border-box;
-      margin-bottom: 0;
-      overflow: visible;
-      position: relative;
-      min-height: 200px;
-      border: 1px solid #e9e9e7;
-      border-radius: 3px;
-      background: #fff;
-    }
-    .modal-container .tile-section {
-      min-height: 1600px;
-      height: 1600px;
-    }
-    .tile-wrapper {
-      width: 100%;
-      margin: 0;
-      padding: 20px;
-      box-sizing: border-box;
-      overflow: visible;
-      position: relative;
-    }
-    .tile-block {
-      transform-origin: top left;
-      box-sizing: border-box;
-      transition: transform 0.3s ease;
-      transform: scale(1);
-      width: 100%;
-    }
-    .tile-block > * {
-      width: 100% !important;
-      box-sizing: border-box !important;
-    }
-    .controls {
-      display: flex;
-      gap: 8px;
-      margin-top: 0;
-      padding: 2px 2px;
-      border-top: 1px solid #e9e9e7;
-      flex-wrap: wrap;
-    }
-    .btn {
-      background: #fff;
-      border: 1px solid #d9d9d6;
-      border-radius: 3px;
-      padding: 4px 8px;
-      font-size: 9px;
-      cursor: pointer;
-      color: #37352f;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      transition: background 0.1s;
-    }
-    .btn:hover {
-      background: #f7f6f3;
-    }
-    .btn svg {
-      width: 10px;
-      height: 10px;
-    }
-    .success {
-      position: fixed;
-      top: 16px;
-      right: 16px;
-      background: #2eaadc;
-      color: white;
-      padding: 8px 12px;
-      border-radius: 3px;
-      font-size: 12px;
-      opacity: 0;
-      transition: opacity 0.2s;
-      z-index: 1000;
-    }
-    .success.show {
-      opacity: 1;
-    }
+    html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif; background: #fff; color: #37352f; line-height: 1.5; overflow-x: hidden; height: auto; min-height: 100%; }
+    .embed-container { width: 100%; min-height: 400px; display: flex; flex-direction: column; box-sizing: border-box; padding-bottom: 0; background: transparent; }
+    .embed-container.modal-container { min-height: 1800px; height: 1800px; padding-bottom: 1000px; }
+    .tile-section { width: 100%; box-sizing: border-box; margin-bottom: 0; overflow: visible; position: relative; min-height: 200px; border: 1px solid #e9e9e7; border-radius: 3px; background: #fff; }
+    .modal-container .tile-section { min-height: 1600px; height: 1600px; }
+    .tile-wrapper { width: 100%; margin: 0; padding: 20px; box-sizing: border-box; overflow: visible; position: relative; }
+    .tile-block { transform-origin: top left; box-sizing: border-box; transition: transform 0.3s ease; transform: scale(1); width: 100%; }
+    .tile-block > * { width: 100% !important; box-sizing: border-box !important; }
+    .controls { display: flex; gap: 8px; margin-top: 0; padding: 2px 2px; border-top: 1px solid #e9e9e7; flex-wrap: wrap; }
+    .btn { background: #fff; border: 1px solid #d9d9d6; border-radius: 3px; padding: 4px 8px; font-size: 9px; cursor: pointer; color: #37352f; display: flex; align-items: center; gap: 4px; transition: background 0.1s; }
+    .btn:hover { background: #f7f6f3; }
+    .btn svg { width: 10px; height: 10px; }
+    .success { position: fixed; top: 16px; right: 16px; background: #2eaadc; color: white; padding: 8px 12px; border-radius: 3px; font-size: 12px; opacity: 0; transition: opacity 0.2s; z-index: 1000; }
+    .success.show { opacity: 1; }
   </style>
 </head>
 <body>
@@ -359,177 +243,63 @@ function generateEmbed(liveContent, client, isModal = false) {
       </div>
     </div>
     <div class="controls">
-      <button class="btn" id="refresh">
-        <i data-lucide="refresh-cw"></i>
-        Refresh
-      </button>
-      <button class="btn" id="copyTile">
-        <i data-lucide="copy"></i>
-        Copy Tile
-      </button>
-      <button class="btn" id="copyTileCode">
-        <i data-lucide="clipboard-copy"></i>
-        Copy Code
-      </button>
-      <button class="btn" id="downloadTile">
-        <i data-lucide="download"></i>
-        Download PNG
-      </button>
+      <button class="btn" id="refresh"><i data-lucide="refresh-cw"></i> Refresh</button>
+      <button class="btn" id="copyTile"><i data-lucide="copy"></i> Copy Tile</button>
+      <button class="btn" id="copyTileCode"><i data-lucide="clipboard-copy"></i> Copy Code</button>
+      <button class="btn" id="downloadTile"><i data-lucide="download"></i> Download PNG</button>
     </div>
   </div>
-
   <script>
     function sendHeightToParent() {
-      var isModalContainer = document.querySelector('.modal-container');
-      var minHeight = isModalContainer ? 1800 : 400;
-      var height = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, minHeight);
+      var height = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, 400);
       try {
         if (window.parent !== window) {
           window.parent.postMessage({ type: 'resize', height: height, source: 'tkauto-embed' }, '*');
-          window.parent.postMessage({ frameHeight: height, type: 'setHeight' }, '*');
-          if (window.frameElement) { window.frameElement.style.height = height + 'px'; }
         }
       } catch (e) {}
     }
-
-    function adjustTileHeight() {
-      var tile = document.getElementById('tile');
-      if (!tile) return;
-      var tileSection = document.querySelector('.tile-section');
-      var tileWrapper = document.querySelector('.tile-wrapper');
-      var embedContainer = document.querySelector('.embed-container');
-
-      tile.style.visibility = 'hidden';
-      tile.style.display = 'block';
-
-      var containerWidth = embedContainer.offsetWidth;
-      var scale = 1;
-
-      if (containerWidth >= 1200) {
-        scale = 1.85;
-      } else if (containerWidth >= 900) {
-        scale = 1.5;
-      } else if (containerWidth >= 600) {
-        scale = 1.3;
-      } else if (containerWidth >= 480) {
-        scale = 1.1;
-      }
-
-      tile.style.transform = 'scale(' + scale + ')';
-      tile.style.width = (100 / scale) + '%';
-      tile.offsetHeight; // force repaint
-
-      var actualHeight = tile.scrollHeight * scale;
-      var cs = window.getComputedStyle(tileWrapper);
-      var wrapperPadding = parseInt(cs.paddingTop, 10) + parseInt(cs.paddingBottom, 10);
-
-      tileSection.style.height = (actualHeight + wrapperPadding + 30) + 'px';
-      tile.style.visibility = 'visible';
-
-      var totalHeight = embedContainer.scrollHeight;
-      embedContainer.style.minHeight = totalHeight + 'px';
-
-      sendHeightToParent();
-    }
-
-    window.addEventListener('load', function () {
-      adjustTileHeight();
-      setTimeout(adjustTileHeight, 100);
-      setTimeout(adjustTileHeight, 500);
-      setTimeout(adjustTileHeight, 1000);
-    });
-
-    var resizeTimeout;
-    window.addEventListener('resize', function () {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(adjustTileHeight, 250);
-    });
-
-    if (document.fonts) {
-      document.fonts.ready.then(adjustTileHeight);
-    }
-
+    window.addEventListener('load', sendHeightToParent);
+    window.addEventListener('resize', sendHeightToParent);
     function showSuccess() {
-      var success = document.getElementById('success');
-      success.classList.add('show');
-      setTimeout(function () { success.classList.remove('show'); }, 1500);
+      var s = document.getElementById('success');
+      s.classList.add('show');
+      setTimeout(function () { s.classList.remove('show'); }, 1500);
     }
-
     function captureElement(selector) {
-      var element = document.querySelector(selector);
-      if (!element) return Promise.reject(new Error('Element not found'));
-      if (typeof html2canvas === 'undefined') return Promise.reject(new Error('html2canvas not loaded'));
-      return html2canvas(element, { useCORS: true, backgroundColor: '#fff', scale: 2 });
+      var el = document.querySelector(selector);
+      if (!el || typeof html2canvas === 'undefined') return Promise.reject(new Error('Element or html2canvas not found'));
+      return html2canvas(el, { useCORS: true, backgroundColor: '#fff', scale: 2 });
     }
-
     function downloadCanvasPNG(canvas, filename) {
-      return new Promise(function (resolve, reject) {
-        canvas.toBlob(function (blob) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
           if (!blob) return reject(new Error('Canvas toBlob failed'));
           var url = URL.createObjectURL(blob);
           var a = document.createElement('a');
-          a.href = url;
-          a.download = filename || 'tile.png';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-          resolve();
+          a.href = url; a.download = filename || 'tile.png';
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url); resolve();
         }, 'image/png');
       });
     }
-
     function copyCanvasToClipboard(canvas) {
-      return new Promise(function (resolve, reject) {
-        canvas.toBlob(function (blob) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
           if (!blob) return reject(new Error('Canvas toBlob failed'));
-          if (!navigator.clipboard) return reject(new Error('Clipboard not available'));
+          if (!navigator.clipboard) return reject(new Error('Clipboard API not available'));
           navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(resolve).catch(reject);
         }, 'image/png');
       });
     }
-
     function copyTextFromEl(id) {
       var el = document.getElementById(id);
-      if (!el) return;
-      var text = el.innerHTML;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(showSuccess).catch(function (err){
-          console.error('Fallback copy failed', err);
-        });
-      }
+      if (el && navigator.clipboard) navigator.clipboard.writeText(el.innerHTML).then(showSuccess).catch(console.error);
     }
-
-    function copyImageFrom(selector) {
-      captureElement(selector)
-        .then(copyCanvasToClipboard)
-        .then(showSuccess)
-        .catch(function (err) {
-          console.error('Copy image failed, falling back to download.', err);
-          downloadImageFrom(selector);
-        });
-    }
-
-    function downloadImageFrom(selector) {
-      captureElement(selector)
-        .then(canvas => downloadCanvasPNG(canvas, 'tile.png'))
-        .then(showSuccess)
-        .catch(function(e) { console.error('Download failed', e); });
-    }
-
-    var btnRefresh = document.getElementById('refresh');
-    var btnCopyTile = document.getElementById('copyTile');
-    var btnCopyTileCode = document.getElementById('copyTileCode');
-    var btnDownloadTile = document.getElementById('downloadTile');
-
-    if (btnRefresh) btnRefresh.addEventListener('click', function () { window.location.reload(); });
-    if (btnCopyTile) btnCopyTile.addEventListener('click', function () { copyImageFrom('.tile-section'); });
-    if (btnCopyTileCode) btnCopyTileCode.addEventListener('click', function () { copyTextFromEl('tile'); });
-    if (btnDownloadTile) btnDownloadTile.addEventListener('click', function () { downloadImageFrom('.tile-section'); });
-
-    if (typeof lucide !== 'undefined') {
-      try { lucide.createIcons(); } catch (e) {}
-    }
+    document.getElementById('refresh').addEventListener('click', () => window.location.reload());
+    document.getElementById('copyTile').addEventListener('click', () => captureElement('.tile-section').then(copyCanvasToClipboard).then(showSuccess).catch(err => { console.error('Copy failed, falling back to download', err); captureElement('.tile-section').then(c => downloadCanvasPNG(c, 'tile.png')).then(showSuccess).catch(console.error); }));
+    document.getElementById('copyTileCode').addEventListener('click', () => copyTextFromEl('tile'));
+    document.getElementById('downloadTile').addEventListener('click', () => captureElement('.tile-section').then(c => downloadCanvasPNG(c, 'tile.png')).then(showSuccess).catch(console.error));
+    if (typeof lucide !== 'undefined') lucide.createIcons();
   </script>
 </body>
 </html>`;
@@ -538,3 +308,4 @@ function generateEmbed(liveContent, client, isModal = false) {
 app.listen(PORT, () => {
   console.log(`Embed app running: http://localhost:${PORT}`);
 });
+
