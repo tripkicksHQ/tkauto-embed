@@ -426,8 +426,10 @@ function generateEmbed(liveTile, client, isModal = false) {
       overflow: visible;
       position: relative;
       min-height: 200px;
-      border: 1px solid #e9e9e7;
-      border-radius: 3px;
+      /* CHANGED: bottom border only, no radius */
+      border: 0;
+      border-bottom: 1px solid #e9e9e7;
+      border-radius: 0;
       background: #fff;
     }
     .modal-container .tile-section {
@@ -437,7 +439,8 @@ function generateEmbed(liveTile, client, isModal = false) {
     .tile-wrapper {
       width: 100%;
       margin: 0;
-      padding: 20px;
+      /* CHANGED: remove padding */
+      padding: 0;
       box-sizing: border-box;
       overflow: visible;
       position: relative;
@@ -464,7 +467,17 @@ function generateEmbed(liveTile, client, isModal = false) {
       position: absolute; bottom: 4px; right: 8px; font-family: 'Monaco','Menlo','Ubuntu Mono',monospace;
       font-size: 10px; color: #ccc; background: rgba(255,255,255,0.8); padding: 2px 4px; border-radius: 2px; pointer-events: none;
     }
-    .modal-section { margin-top: 20px; border: 1px solid #e9e9e7; border-radius: 3px; position: relative; background: #fff; min-height: 100px; padding: 16px; }
+    /* CHANGED: make modal-section match (bottom border only, no padding) */
+    .modal-section {
+      margin-top: 20px;
+      border: 0;
+      border-bottom: 1px solid #e9e9e7;
+      border-radius: 0;
+      position: relative;
+      background: #fff;
+      min-height: 100px;
+      padding: 0;
+    }
     .btn {
       background: #fff; border: 1px solid #d9d9d6; border-radius: 3px; padding: 4px 8px; font-size: 9px; cursor: pointer;
       color: #555; display: flex; align-items: center; gap: 4px; transition: background 0.1s;
@@ -530,7 +543,7 @@ function generateEmbed(liveTile, client, isModal = false) {
     }
 
     function parseFitNcol(zoomStr) {
-      const m = /^fit(\\d+)col$/i.exec(zoomStr || '');
+      const m = /^fit(\d+)col$/i.exec(zoomStr || '');
       return m ? Math.max(1, parseInt(m[1], 10)) : null;
     }
 
