@@ -119,7 +119,18 @@ function extractPageIdFromUrl(url) {
  * Pick tile/modal HTML off a page
  * ------------------------------ */
 function getTileHtmlFromPage(page) {
-  const candidates = ['Tile_Content', 'Tile HTML', 'TileContent', 'Tile Content', 'Tile', 'HTML'];
+  // Broadened candidates list
+  const candidates = [
+    'Tile_Content',
+    'Tile HTML',
+    'TileContent',
+    'Tile Content',
+    'Tile Content 2',
+    'Tile_Content_',
+    'tileAutoHTML',
+    'Tile',
+    'HTML'
+  ];
   for (const key of candidates) {
     if (page.properties[key]) {
       return sanitizeHtml(extractHtml(page.properties[key]));
@@ -129,7 +140,15 @@ function getTileHtmlFromPage(page) {
 }
 
 function getModalHtmlFromPage(page) {
-  const candidates = ['Modal HTML', 'ModalContent', 'Modal_Content', 'Modal Content', 'Modal'];
+  // Broadened candidates list
+  const candidates = [
+    'Modal HTML',
+    'Modal Live',
+    'ModalContent',
+    'Modal_Content',
+    'Modal Content',
+    'Modal'
+  ];
   for (const key of candidates) {
     if (page.properties[key]) {
       return sanitizeHtml(extractHtml(page.properties[key]));
@@ -358,6 +377,10 @@ app.get('/modal', async (req, res) => {
 
 /* ---------------------------
  * HTML shell for the embed UI
+ * - now supports zoom via:
+ *   ?zoom=1.8
+ *   ?zoom=fit3col / fit4col / fit5col / fitNcol
+ * - and auto-bump in iframe if not provided
  * ------------------------- */
 function generateEmbed(liveTile, client, isModal = false) {
   return `<!DOCTYPE html>
@@ -474,6 +497,68 @@ function generateEmbed(liveTile, client, isModal = false) {
   </div>
 
   <script>
+    // --- Zoom helpers ---
+    function readZoomParam() {
+      try {
+        const url = new URL(window.location.href);
+        const z = url.searchParams.get('zoom') || url.searchParams.get('tkzoom');
+        return z ? String(z).trim() : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function parseFitNcol(zoomStr) {
+      // matches fit3col, fit4col, fit10col, etc.
+      const m = /^fit(\\d+)col$/i.exec(zoomStr || '');
+      return m ? Math.max(1, parseInt(m[1], 10)) : null;
+    }
+
+    // Compute a scale value based on:
+    //  - explicit numeric zoom (e.g., 1.6)
+    //  - fitNcol keyword (simulate wide multi-column)
+    //  - default rules with a bump for tight iframes
+    function computeScale(containerWidth) {
+      const zoomStr = readZoomParam();
+
+      // 1) Explicit numeric zoom
+      if (zoomStr) {
+        const numeric = parseFloat(zoomStr);
+        if (!isNaN(numeric) && numeric > 0) {
+          return clamp(numeric, 0.6, 3.0);
+        }
+      }
+
+      // 2) fitNcol mode: pretend we had wide columns
+      const ncols = parseFitNcol(zoomStr);
+      if (ncols) {
+        // Assume a 1800px content area split into N columns
+        const targetWidth = 1800 / ncols;
+        const scale = targetWidth / Math.max(1, containerWidth);
+        return clamp(scale, 1.0, 2.5);
+      }
+
+      // 3) Default responsive ladder
+      let scale;
+      if (containerWidth >= 1200) scale = 1.85;
+      else if (containerWidth >= 900) scale = 1.5;
+      else if (containerWidth >= 600) scale = 1.3;
+      else if (containerWidth >= 480) scale = 1.1;
+      else scale = 1.0;
+
+      // If we're inside an iframe (e.g., Notion side peek), enforce a larger minimum
+      const isInIframe = window.self !== window.top;
+      if (isInIframe && containerWidth < 640) {
+        scale = Math.max(scale, 1.5);
+      }
+
+      return clamp(scale, 0.6, 2.5);
+    }
+
+    function clamp(x, lo, hi) {
+      return Math.min(Math.max(x, lo), hi);
+    }
+
     function sendHeightToParent() {
       const isModalContainer = document.querySelector('.modal-container');
       const minHeight = isModalContainer ? 1800 : 400;
@@ -495,12 +580,9 @@ function generateEmbed(liveTile, client, isModal = false) {
       tile.style.display = 'block';
 
       const containerWidth = embedContainer.offsetWidth;
-      let scale = 1;
-      if (containerWidth >= 1200) scale = 1.85;
-      else if (containerWidth >= 900) scale = 1.5;
-      else if (containerWidth >= 600) scale = 1.3;
-      else if (containerWidth >= 480) scale = 1.1;
+      let scale = computeScale(containerWidth);
 
+      // Optional: height guardrail for iframe
       const isInNotion = window.self !== window.top;
       if (isInNotion) {
         const availableHeight = window.innerHeight || 800;
@@ -509,12 +591,13 @@ function generateEmbed(liveTile, client, isModal = false) {
         const potentialHeight = tile.scrollHeight * scale;
         if (potentialHeight > maxTileHeight) {
           scale = Math.min(scale, maxTileHeight / tile.scrollHeight);
-          scale = Math.max(scale, 0.8);
+          scale = Math.max(scale, 1.0); // keep reasonable minimum
         }
       }
 
-      tile.style.transform = \`scale(\${scale})\`;
-      tile.style.width = \`\${100 / scale}%\`;
+      // Use classic strings (no backticks) to avoid template-escaping issues
+      tile.style.transform = 'scale(' + scale + ')';
+      tile.style.width = (100 / scale) + '%';
 
       // Force reflow
       void tile.offsetHeight;
@@ -533,7 +616,7 @@ function generateEmbed(liveTile, client, isModal = false) {
     }
 
     let heightUpdateCount = 0;
-    const maxHeightUpdates = 5;
+    const maxHeightUpdates = 6;
     function finalizeHeight() {
       if (heightUpdateCount >= maxHeightUpdates) return;
       heightUpdateCount++;
