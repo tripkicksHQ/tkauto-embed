@@ -119,7 +119,6 @@ function extractPageIdFromUrl(url) {
  * Pick tile/modal HTML off a page
  * ------------------------------ */
 function getTileHtmlFromPage(page) {
-  // Broadened candidates list
   const candidates = [
     'Tile_Content',
     'Tile HTML',
@@ -140,7 +139,6 @@ function getTileHtmlFromPage(page) {
 }
 
 function getModalHtmlFromPage(page) {
-  // Broadened candidates list
   const candidates = [
     'Modal HTML',
     'Modal Live',
@@ -252,7 +250,7 @@ app.get('/embed', async (req, res) => {
       liveTile = getTileHtmlFromPage(page);
 
       if (!liveTile) {
-        errorMsg = `Page found but no tile content. Available properties: ${Object.keys(page.properties).join(', ')}`;
+        errorMsg = 'Page found but no tile content. Available properties: ' + Object.keys(page.properties).join(', ');
         console.log(errorMsg);
       }
     } else {
@@ -261,11 +259,11 @@ app.get('/embed', async (req, res) => {
     }
   } catch (e) {
     console.error('Error in /embed:', e);
-    errorMsg = `<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ${e.message}</div>`;
+    errorMsg = '<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ' + e.message + '</div>';
   }
 
   if (errorMsg) liveTile = errorMsg;
-  if (!liveTile) liveTile = `<div style="color:#999; font-size:14px; padding:8px;">No tile content found</div>`;
+  if (!liveTile) liveTile = '<div style="color:#999; font-size:14px; padding:8px;">No tile content found</div>';
 
   res.send(generateEmbed(liveTile, client, false));
 });
@@ -357,7 +355,7 @@ app.get('/modal', async (req, res) => {
       liveModal = getModalHtmlFromPage(page);
 
       if (!liveModal) {
-        errorMsg = `Page found but no modal content. Available properties: ${Object.keys(page.properties).join(', ')}`;
+        errorMsg = 'Page found but no modal content. Available properties: ' + Object.keys(page.properties).join(', ');
         console.log(errorMsg);
       }
     } else {
@@ -366,21 +364,23 @@ app.get('/modal', async (req, res) => {
     }
   } catch (e) {
     console.error('Error in /modal:', e);
-    errorMsg = `<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ${e.message}</div>`;
+    errorMsg = '<div style="color:#e03e3e; font-size:14px; padding:8px;">Error: ' + e.message + '</div>';
   }
 
   if (errorMsg) liveModal = errorMsg;
-  if (!liveModal) liveModal = `<div style="color:#999; font-size:14px; padding:8px;">No modal content found</div>`;
+  if (!liveModal) liveModal = '<div style="color:#999; font-size:14px; padding:8px;">No modal content found</div>';
 
   res.send(generateEmbed(liveModal, client, true));
 });
 
 /* ---------------------------
  * HTML shell for the embed UI
- * - now supports zoom via:
- *   ?zoom=1.8
- *   ?zoom=fit3col / fit4col / fit5col / fitNcol
- * - and auto-bump in iframe if not provided
+ * - supports zoom via query OR hash:
+ *   ?zoom=1.8, ?zoom=fit4col, ?z=1.6, #zoom=3, #z=fit5col
+ * - explicit zoom disables auto-bump; no zoom -> auto-bump (for tight iframes)
+ * - optional debug=1 to show computed scale badge
+ * - DEBUG BADGE CLICK CYCLE:
+ *   Normal → fit1col → fit2col → fit3col → 0.8 → 0.9 → 1 → 1.25 → 1.5 → Normal
  * ------------------------- */
 function generateEmbed(liveTile, client, isModal = false) {
   return `<!DOCTYPE html>
@@ -476,6 +476,12 @@ function generateEmbed(liveTile, client, isModal = false) {
       font-size: 12px; opacity: 0; transition: opacity 0.2s; z-index: 1000;
     }
     .success.show { opacity: 1; }
+    .debug-badge {
+      position: fixed; bottom: 10px; right: 10px; background: rgba(46,170,220,0.1); border: 1px solid #2eaadc;
+      color: #2eaadc; font-size: 11px; padding: 4px 8px; border-radius: 4px; z-index: 1001; cursor: pointer;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      user-select: none;
+    }
     @supports (container-type: inline-size) { .tile-wrapper { container-type: inline-size; } }
   </style>
 </head>
@@ -496,49 +502,100 @@ function generateEmbed(liveTile, client, isModal = false) {
     </div>
   </div>
 
+  <div class="debug-badge" id="debugBadge" style="display:none" title="Click to toggle zoom modes"></div>
+
   <script>
-    // --- Zoom helpers ---
-    function readZoomParam() {
+    // --- Zoom helpers (query + hash; explicit zoom disables auto-bump) ---
+    function getSearchParam(name) {
       try {
         const url = new URL(window.location.href);
-        const z = url.searchParams.get('zoom') || url.searchParams.get('tkzoom');
-        return z ? String(z).trim() : null;
-      } catch (_) {
-        return null;
-      }
+        return url.searchParams.get(name);
+      } catch (_) { return null; }
+    }
+
+    function getHashParam(name) {
+      const hash = window.location.hash || '';
+      if (!hash || hash.length < 2) return null;
+      const q = new URLSearchParams(hash.slice(1));
+      return q.get(name);
+    }
+
+    function readZoomParamAny() {
+      // Priority: query.zoom -> query.z -> hash.zoom -> hash.z
+      const qz = getSearchParam('zoom') || getSearchParam('z');
+      if (qz) return { value: String(qz).trim(), source: 'query' };
+      const hz = getHashParam('zoom') || getHashParam('z');
+      if (hz) return { value: String(hz).trim(), source: 'hash' };
+      return null;
     }
 
     function parseFitNcol(zoomStr) {
-      // matches fit3col, fit4col, fit10col, etc.
       const m = /^fit(\\d+)col$/i.exec(zoomStr || '');
       return m ? Math.max(1, parseInt(m[1], 10)) : null;
     }
 
-    // Compute a scale value based on:
-    //  - explicit numeric zoom (e.g., 1.6)
-    //  - fitNcol keyword (simulate wide multi-column)
-    //  - default rules with a bump for tight iframes
+    function clamp(x, lo, hi) {
+      return Math.min(Math.max(x, lo), hi);
+    }
+
+    // ----------------------------
+    // Debug toggle override state
+    // ----------------------------
+    const DEBUG_SEQUENCE = [
+      'auto',         // Normal (auto)
+      'fit1col',
+      'fit2col',
+      'fit3col',
+      'zoom:0.8',
+      'zoom:0.9',
+      'zoom:1',
+      'zoom:1.25',
+      'zoom:1.5'
+    ];
+    let debugOverride = null; // null = no override (respect URL or auto)
+    let debugIndex = 0;
+
+    function labelForState(state) {
+      if (!state || state === 'auto') return 'Normal';
+      if (state.startsWith('fit')) return state;
+      if (state.startsWith('zoom:')) return state.replace('zoom:', 'zoom=');
+      return state;
+    }
+
     function computeScale(containerWidth) {
-      const zoomStr = readZoomParam();
-
-      // 1) Explicit numeric zoom
-      if (zoomStr) {
-        const numeric = parseFloat(zoomStr);
-        if (!isNaN(numeric) && numeric > 0) {
-          return clamp(numeric, 0.6, 3.0);
+      // If debug override present, use it (ignores URL params)
+      if (debugOverride) {
+        if (debugOverride.startsWith('fit')) {
+          const ncols = parseInt(debugOverride.replace(/[^\d]/g, ''), 10) || 1;
+          const targetWidth = 1800 / ncols;
+          const scale = targetWidth / Math.max(1, containerWidth);
+          return { scale: clamp(scale, 1.0, 2.5), source: 'debug:' + debugOverride };
         }
+        if (debugOverride.startsWith('zoom:')) {
+          const val = parseFloat(debugOverride.split(':')[1]);
+          const s = isNaN(val) ? 1 : val;
+          return { scale: clamp(s, 0.6, 3.0), source: 'debug:zoom' };
+        }
+        // 'auto' → fall through
       }
 
-      // 2) fitNcol mode: pretend we had wide columns
-      const ncols = parseFitNcol(zoomStr);
-      if (ncols) {
-        // Assume a 1800px content area split into N columns
-        const targetWidth = 1800 / ncols;
-        const scale = targetWidth / Math.max(1, containerWidth);
-        return clamp(scale, 1.0, 2.5);
+      const z = readZoomParamAny();
+      if (z && z.value) {
+        // Explicit zoom provided -> honor it and skip auto-bump
+        const numeric = parseFloat(z.value);
+        if (!isNaN(numeric) && numeric > 0) {
+          return { scale: clamp(numeric, 0.6, 3.0), source: z.source + ':numeric' };
+        }
+        const ncols = parseFitNcol(z.value);
+        if (ncols) {
+          const targetWidth = 1800 / ncols; // pretend wide canvas split in N columns
+          const scale = targetWidth / Math.max(1, containerWidth);
+          return { scale: clamp(scale, 1.0, 2.5), source: z.source + ':fitNcol(' + ncols + ')' };
+        }
+        // If malformed, fall through to default auto logic
       }
 
-      // 3) Default responsive ladder
+      // --- Auto-bump (only when no explicit zoom) ---
       let scale;
       if (containerWidth >= 1200) scale = 1.85;
       else if (containerWidth >= 900) scale = 1.5;
@@ -546,17 +603,24 @@ function generateEmbed(liveTile, client, isModal = false) {
       else if (containerWidth >= 480) scale = 1.1;
       else scale = 1.0;
 
-      // If we're inside an iframe (e.g., Notion side peek), enforce a larger minimum
       const isInIframe = window.self !== window.top;
       if (isInIframe && containerWidth < 640) {
-        scale = Math.max(scale, 1.5);
+        scale = Math.max(scale, 1.5); // helpful bump in Notion side peek
       }
 
-      return clamp(scale, 0.6, 2.5);
+      return { scale: clamp(scale, 0.6, 2.5), source: 'auto' };
     }
 
-    function clamp(x, lo, hi) {
-      return Math.min(Math.max(x, lo), hi);
+    function showDebug(scaleInfo) {
+      const debug = getSearchParam('debug') || getHashParam('debug');
+      const el = document.getElementById('debugBadge');
+      if (!debug) {
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = 'block';
+      const stateLabel = labelForState(debugOverride || 'auto');
+      el.textContent = stateLabel + ' • scale=' + scaleInfo.scale.toFixed(3) + ' (' + scaleInfo.source + ')';
     }
 
     function sendHeightToParent() {
@@ -580,29 +644,16 @@ function generateEmbed(liveTile, client, isModal = false) {
       tile.style.display = 'block';
 
       const containerWidth = embedContainer.offsetWidth;
-      let scale = computeScale(containerWidth);
+      const info = computeScale(containerWidth);
+      showDebug(info);
 
-      // Optional: height guardrail for iframe
-      const isInNotion = window.self !== window.top;
-      if (isInNotion) {
-        const availableHeight = window.innerHeight || 800;
-        const modalSectionHeight = 300;
-        const maxTileHeight = availableHeight - modalSectionHeight - 100;
-        const potentialHeight = tile.scrollHeight * scale;
-        if (potentialHeight > maxTileHeight) {
-          scale = Math.min(scale, maxTileHeight / tile.scrollHeight);
-          scale = Math.max(scale, 1.0); // keep reasonable minimum
-        }
-      }
-
-      // Use classic strings (no backticks) to avoid template-escaping issues
-      tile.style.transform = 'scale(' + scale + ')';
-      tile.style.width = (100 / scale) + '%';
+      tile.style.transform = 'scale(' + info.scale + ')';
+      tile.style.width = (100 / info.scale) + '%';
 
       // Force reflow
       void tile.offsetHeight;
 
-      const actualHeight = tile.scrollHeight * scale;
+      const actualHeight = tile.scrollHeight * info.scale;
       const wrapperPadding = parseInt(window.getComputedStyle(tileWrapper).paddingTop) +
                              parseInt(window.getComputedStyle(tileWrapper).paddingBottom);
       tileSection.style.height = (actualHeight + wrapperPadding + 30) + 'px';
@@ -645,7 +696,7 @@ function generateEmbed(liveTile, client, isModal = false) {
       document.fonts.ready.then(finalizeHeight);
     }
 
-    function showSuccess() {
+    function showSuccessToast() {
       const success = document.getElementById('success');
       success.classList.add('show');
       setTimeout(() => success.classList.remove('show'), 1500);
@@ -664,7 +715,7 @@ function generateEmbed(liveTile, client, isModal = false) {
         const blob = await captureElement(selector);
         if (!navigator.clipboard) throw new Error('Clipboard API not supported');
         await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
-        showSuccess();
+        showSuccessToast();
       } catch (err) {
         console.error('Copy image failed:', err);
         alert('Copy failed: ' + err.message);
@@ -677,7 +728,7 @@ function generateEmbed(liveTile, client, isModal = false) {
         if (!element) throw new Error('Element not found: ' + elementId);
         if (!navigator.clipboard) throw new Error('Clipboard API not supported');
         await navigator.clipboard.writeText(element.innerHTML);
-        showSuccess();
+        showSuccessToast();
       } catch (err) {
         console.error('Copy text failed:', err);
         alert('Copy failed: ' + err.message);
@@ -687,6 +738,27 @@ function generateEmbed(liveTile, client, isModal = false) {
     document.getElementById('refresh').onclick = () => window.location.reload();
     document.getElementById('copyTile').onclick = () => copyImage('.tile-section');
     document.getElementById('copyTileCode').onclick = () => copyText('tile');
+
+    // --- Debug badge toggle (only active when debug=1) ---
+    (function initDebugToggle() {
+      const hasDebug = getSearchParam('debug') || getHashParam('debug');
+      const badge = document.getElementById('debugBadge');
+      if (!hasDebug) return;
+
+      // Click to advance through the sequence
+      badge.addEventListener('click', () => {
+        // Advance index
+        debugIndex = (debugIndex + 1) % DEBUG_SEQUENCE.length;
+        const next = DEBUG_SEQUENCE[debugIndex];
+
+        // Set override (auto means clear override)
+        debugOverride = (next === 'auto') ? null : next;
+
+        // Recompute and redraw
+        heightUpdateCount = 0; // allow a few more updates after toggle
+        finalizeHeight();
+      });
+    })();
 
     if (typeof lucide !== 'undefined') {
       lucide.createIcons();
@@ -700,5 +772,5 @@ function generateEmbed(liveTile, client, isModal = false) {
  * Start the HTTP server
  * ---------------------- */
 app.listen(PORT, () => {
-  console.log(`[tkAuto-Embed] Server on http://localhost:${PORT}`);
+  console.log('[tkAuto-Embed] Server on http://localhost:' + PORT);
 });
