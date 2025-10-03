@@ -102,7 +102,7 @@ app.get('/embed', async (req, res) => {
           (!DATABASE_ID ? 'DATABASE_ID' : '')
       );
     }
-
+    let targetTkid = req.query.tkid || pageId;
     let page;
     let targetTkid = req.query.tkid;
 
