@@ -102,17 +102,17 @@ app.get('/embed', async (req, res) => {
           (!DATABASE_ID ? 'DATABASE_ID' : '')
       );
     }
+    
     let targetTkid = req.query.tkid || pageId;
     let page;
-    let targetTkid = req.query.tkid;
 
     if (!targetTkid) {
       // Fallback - search through pages to find one with content
       const db = await withTimeout(
         notion.databases.query({
           database_id: DATABASE_ID,
-            page_size: 10,
-          }),
+          page_size: 10,
+        }),
         8000,
         'Notion query (fallback list)'
       );
@@ -139,12 +139,12 @@ app.get('/embed', async (req, res) => {
       try {
         const searchResults = await withTimeout(
           notion.databases.query({
-          database_id: DATABASE_ID,
-              filter: {
-                property: 'TK id',
-                rich_text: { equals: targetTkid },
-              },
-            }),
+            database_id: DATABASE_ID,
+            filter: {
+              property: 'TK id',
+              rich_text: { equals: targetTkid },
+            },
+          }),
           8000,
           'Notion query (TK id)'
         );
@@ -156,12 +156,12 @@ app.get('/embed', async (req, res) => {
           // Try TK id Temp formula
           const tempResults = await withTimeout(
             notion.databases.query({
-          database_id: DATABASE_ID,
-                filter: {
-                  property: 'TK id Temp',
-                  formula: { string: { equals: targetTkid } },
-                },
-              }),
+              database_id: DATABASE_ID,
+              filter: {
+                property: 'TK id Temp',
+                formula: { string: { equals: targetTkid } },
+              },
+            }),
             8000,
             'Notion query (TK id Temp)'
           );
@@ -255,14 +255,15 @@ app.get('/modal', async (req, res) => {
     }
 
     let page;
-    let targetTkid = req.query.tkid;
+    let targetTkid = req.query.tkid || pageId;
 
     if (!targetTkid) {
+      // Fallback - search through pages to find one with modal content
       const db = await withTimeout(
         notion.databases.query({
           database_id: DATABASE_ID,
-            page_size: 10,
-          }),
+          page_size: 10,
+        }),
         8000,
         'Notion query (modal fallback list)'
       );
@@ -285,15 +286,16 @@ app.get('/modal', async (req, res) => {
         console.log('Using first page as fallback for modal:', page.id);
       }
     } else {
+      // Search for page with matching TK id
       try {
         const searchResults = await withTimeout(
           notion.databases.query({
-          database_id: DATABASE_ID,
-              filter: {
-                property: 'TK id',
-                rich_text: { equals: targetTkid },
-              },
-            }),
+            database_id: DATABASE_ID,
+            filter: {
+              property: 'TK id',
+              rich_text: { equals: targetTkid },
+            },
+          }),
           8000,
           'Notion query (modal TK id)'
         );
@@ -302,14 +304,15 @@ app.get('/modal', async (req, res) => {
           page = searchResults.results[0];
           console.log('Found page by TK id match for modal:', targetTkid);
         } else {
+          // Try TK id Temp formula
           const tempResults = await withTimeout(
             notion.databases.query({
-          database_id: DATABASE_ID,
-                filter: {
-                  property: 'TK id Temp',
-                  formula: { string: { equals: targetTkid } },
-                },
-              }),
+              database_id: DATABASE_ID,
+              filter: {
+                property: 'TK id Temp',
+                formula: { string: { equals: targetTkid } },
+              },
+            }),
             8000,
             'Notion query (modal TK id Temp)'
           );
@@ -328,6 +331,7 @@ app.get('/modal', async (req, res) => {
       console.log('Page found for modal, ID:', page.id);
       console.log('Page properties:', Object.keys(page.properties));
 
+      // Get client from TK id or TK id Temp
       const tkIdValue =
         extractText(page.properties['TK id']) ||
         extractText(page.properties['TK id Temp']) ||
@@ -336,6 +340,7 @@ app.get('/modal', async (req, res) => {
         client = tkIdValue.split('.')[0];
       }
 
+      // Try multiple possible property names for modal content
       const possibleModalProps = ['Modal HTML', 'ModalContent', 'Modal_Content', 'Modal Content', 'Modal'];
 
       for (const propName of possibleModalProps) {
