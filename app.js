@@ -85,12 +85,16 @@ function extractHtml(prop) {
 
 function extractText(prop) {
   if (!prop) return '';
-  if (prop.type === 'title' && prop.title.length) return prop.title[0].plain_text;
-  if (prop.type === 'rich_text' && prop.rich_text.length) return prop.rich_text[0].plain_text;
+  if (prop.type === 'title' && prop.title.length) return prop.title.map(t => t.plain_text).join('');
+  if (prop.type === 'rich_text' && prop.rich_text.length) return prop.rich_text.map(t => t.plain_text).join('');
   if (prop.type === 'formula') {
     if (prop.formula.type === 'string' && prop.formula.string !== null) return prop.formula.string;
     if (prop.formula.type === 'number' && prop.formula.number !== null) return String(prop.formula.number);
   }
+  if (prop.type === 'select') return prop.select?.name || '';
+  if (prop.type === 'multi_select') return (prop.multi_select || []).map(o => o.name).join(', ');
+  if (prop.type === 'status') return prop.status?.name || '';
+  if (prop.type === 'number' && prop.number !== null) return String(prop.number);
   return '';
 }
 
@@ -159,7 +163,184 @@ function getModalHtmlFromPage(page) {
  * Express routes
  * --------------- */
 app.get('/', (_req, res) => {
-  res.send('tkAuto Embed App - Use /embed or /modal');
+  res.send('tkAuto Embed App - Use /embed, /modal, or /playbook-rolodex.json');
+});
+
+/* -----------------------------------------------------
+ * /playbook-rolodex.json
+ * Returns a JSON feed for the PlaybookRolodex review tool.
+ * For each Playbook tactic, follows the tk2Templates relation
+ * and emits { tactic: {vars}, template: { name, fullHtml } }.
+ * Framer code component fetches this and renders 3 intensities
+ * side by side using {Variable} placeholder substitution.
+ * --------------------------------------------------- */
+const PLAYBOOK_DB_ID = '31853105e685819690a0e1478f019ed5';
+const TEMPLATES_DB_ID = '31153105e68580e6abe6d7967e495886';
+// Page ID of "tempA new variant" — used as the fallback template when a
+// Playbook row has no tk2Templates relation set yet.
+const DEFAULT_TEMPLATE_PAGE_ID = '35353105e68581c6b1d9d8ea5f0426a9';
+
+function extractRelationIds(prop) {
+  if (!prop || prop.type !== 'relation') return [];
+  return (prop.relation || []).map(r => r.id);
+}
+
+function extractSelect(prop) {
+  if (!prop) return '';
+  if (prop.type === 'select') return prop.select?.name || '';
+  if (prop.type === 'multi_select') return (prop.multi_select || []).map(o => o.name).join(', ');
+  return '';
+}
+
+function extractNumber(prop) {
+  if (!prop) return null;
+  if (prop.type === 'number') return prop.number;
+  if (prop.type === 'formula' && prop.formula.type === 'number') return prop.formula.number;
+  return null;
+}
+
+function extractFile(prop) {
+  if (!prop || prop.type !== 'files') return '';
+  const f = (prop.files || [])[0];
+  if (!f) return '';
+  return f.external?.url || f.file?.url || '';
+}
+
+async function fetchAllPages(dbId) {
+  const all = [];
+  let cursor = undefined;
+  do {
+    const res = await queryDatabaseSafe(notion, {
+      database_id: dbId,
+      page_size: 100,
+      ...(cursor ? { start_cursor: cursor } : {})
+    });
+    all.push(...(res.results || []));
+    cursor = res.has_more ? res.next_cursor : null;
+  } while (cursor);
+  return all;
+}
+
+function normalizePageId(id) {
+  return (id || '').replace(/-/g, '');
+}
+
+// Map loose Template Set hints to the actual Notion template name. Used
+// when a tactic row uses a shorthand (e.g. "two-stat") that doesn't match
+// any template literally even after normalization. Add entries here when
+// new shorthands appear.
+const TEMPLATE_NAME_ALIASES = {
+  'two-stat': 'tempE Revised',
+};
+
+// Normalize a template name string so loose hints in tactic.Template Set
+// (e.g. "tempC-image", "test-balance-text") can match Notion template
+// names (e.g. "tempC (image)", "test balance text") that use different
+// punctuation conventions. Lowercase, strip parens, collapse hyphens
+// and underscores to single spaces, trim.
+function normalizeTemplateName(s) {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[()]/g, ' ')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+app.get('/playbook-rolodex.json', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  // Edge cache for 10 min, stale-while-revalidate for 1 hour so users always
+  // get a fast response while the next request silently refreshes the cache.
+  res.set('Cache-Control', 'public, s-maxage=600, max-age=60, stale-while-revalidate=3600');
+  try {
+    if (!process.env.NOTION_TOKEN) throw new Error('NOTION_TOKEN missing');
+
+    const [tactics, templates] = await Promise.all([
+      fetchAllPages(PLAYBOOK_DB_ID),
+      fetchAllPages(TEMPLATES_DB_ID)
+    ]);
+
+    const templatesById = {};
+    const templatesByNormName = {};
+    for (const t of templates) {
+      const fullHtml = extractText(t.properties['Full HTML']);
+      const name = extractText(t.properties['Name']);
+      const obj = { id: t.id, name, fullHtml };
+      templatesById[normalizePageId(t.id)] = obj;
+      const norm = normalizeTemplateName(name);
+      if (norm) templatesByNormName[norm] = obj;
+    }
+
+    // Filter out tactic parent rows (one per tactic, e.g., "Same Day Trips",
+    // "City Cap Guidance"). Those have a tactic_number but no Variant and no
+    // Touchpoint - they're grouping pages, not variant cells. The rolodex
+    // is a variant viewer, so parents have no place here.
+    const variantCells = tactics.filter(p => {
+      const props = p.properties;
+      const variant = extractSelect(props['Variant']);
+      const touchpoint = extractSelect(props['Touchpoint']);
+      return Boolean(variant || touchpoint);
+    });
+
+    const items = variantCells.map(p => {
+      const props = p.properties;
+      const templateRelIds = extractRelationIds(props['tk2Templates']);
+      let tpl = templateRelIds
+        .map(rid => templatesById[normalizePageId(rid)])
+        .find(Boolean) || null;
+      if (!tpl) {
+        const tsRaw = extractText(props['Template Set']);
+        const ts = TEMPLATE_NAME_ALIASES[tsRaw] || tsRaw;
+        const norm = normalizeTemplateName(ts);
+        if (norm) tpl = templatesByNormName[norm] || null;
+      }
+
+      return {
+        id: p.id,
+        url: p.url,
+        created_time: p.created_time,
+        last_edited_time: p.last_edited_time,
+        tactic: {
+          name: extractText(props['Name']),
+          variant: extractSelect(props['Variant']),
+          touchpoint: extractSelect(props['Touchpoint']),
+          tactic_number: extractText(props['Tactic #']) || extractNumber(props['Tactic #']),
+          score_target: extractNumber(props['Score Target']) ?? extractText(props['Score Target']),
+          template_set: extractText(props['Template Set']),
+          directive: extractText(props['Directive']),
+          detail1: extractText(props['Detail 1']),
+          detail2: extractText(props['Detail 2']),
+          detail3: extractText(props['Detail 3']),
+          stat1: extractText(props['Stat 1 (Personal)']),
+          stat2: extractText(props['Stat 2 (Peer/Company)']),
+          stat3: extractText(props['Stat 3 (Other)']),
+          cta: extractSelect(props['CTA']) || extractText(props['CTA']),
+          tag: extractSelect(props['Tag']) || extractText(props['Tag']),
+          image: extractText(props['Image (Path)']) || extractFile(props['Image (Path)'])
+        },
+        template: tpl ? { name: tpl.name, fullHtml: tpl.fullHtml } : null
+      };
+    });
+
+    const defaultTpl = templatesById[normalizePageId(DEFAULT_TEMPLATE_PAGE_ID)] || null;
+    // Expose the full template universe so consumers can see every template
+    // available in Notion's tk2Templates DB, including the Email-type ones
+    // not currently referenced by any tactic cell.
+    const allTemplates = Object.values(templatesById)
+      .filter(t => t.name)
+      .map(t => ({ id: t.id, name: t.name, fullHtml: t.fullHtml }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    res.json({
+      generated_at: new Date().toISOString(),
+      count: items.length,
+      defaultTemplate: defaultTpl ? { name: defaultTpl.name, fullHtml: defaultTpl.fullHtml } : null,
+      templates: allTemplates,
+      items
+    });
+  } catch (e) {
+    console.error('Error in /playbook-rolodex.json:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 /**
